@@ -196,6 +196,30 @@ def http_server() -> ServerInfo:
     return info
 
 
+class _HTTPServerIPv6(HTTPServer):
+    address_family = socket.AF_INET6
+
+
+def _free_port_ipv6() -> int:
+    with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+        s.bind(("::1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="session")
+def http_server_ipv6() -> ServerInfo:
+    """HTTP server bound to ::1.  Skipped if IPv6 loopback is unavailable."""
+    try:
+        port = _free_port_ipv6()
+    except OSError:
+        pytest.skip("IPv6 loopback not available")
+    httpd = _HTTPServerIPv6(("::1", port), _TestHandler)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    info = ServerInfo(host="::1", port=port, url=f"http://[::1]:{port}")
+    return info
+
+
 # ---------------------------------------------------------------------------
 # HTTPS test server with self-signed cert
 # ---------------------------------------------------------------------------

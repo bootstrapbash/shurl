@@ -125,9 +125,12 @@ _tcp_connect() {
 # bash exposes them via COPROC[0] (read) and COPROC[1] (write).
 _tls_connect() {
   command -v openssl &>/dev/null || die "openssl is required for HTTPS"
+  # IPv6 bare addresses (contain ':') must be bracketed in the -connect arg.
+  local connect_host="$1"
+  [[ "$1" == *:* ]] && connect_host="[$1]"
   # shellcheck disable=SC2031,SC2154  # $COPROC is set by coproc builtin
   coproc { exec openssl s_client -quiet \
-    -connect "$1:$2" -servername "$1" 2>/dev/null; }
+    -connect "${connect_host}:$2" -servername "$1" 2>/dev/null; }
   tls_pid=$!
   if [[ -n "${_IS_ZSH}" ]]; then
     # zsh: dup coproc stdout/stdin via the p descriptor.
@@ -205,17 +208,23 @@ fi
 # -- URL parsing --
 parse_url() {
   local raw_url="$1"
-  local url_re='^((https?)://)?([A-Za-z0-9._~%-]+)(:([0-9]+))?(/[^#]*)?(#.*)?$'
+  # Host is either an IPv6 literal in brackets (\[[^\]]+\]) or a plain
+  # hostname / IPv4 address.  The two alternatives are group 3 (outer),
+  # which shifts port to group 7 and path to group 8.
+  local url_re='^((https?)://)?((\[[^]]+\])|([A-Za-z0-9._~%-]+))(:([0-9]+))?(/[^#]*)?(#.*)?$'
   if _regex "${raw_url}" "${url_re}"; then
     url_scheme="${_regex_groups[2]:-http}"
-    url_host="${_regex_groups[3]}"
-    url_port="${_regex_groups[5]}"
-    url_path="${_regex_groups[6]:-/}"
+    url_host="${_regex_groups[3]}"   # includes brackets for IPv6, e.g. [::1]
+    url_port="${_regex_groups[7]}"
+    url_path="${_regex_groups[8]:-/}"
   else
     die "Malformed URL: ${raw_url}"
   fi
   [[ -z "${url_host}" ]] && die "No host in URL: ${raw_url}"
   [[ -z "${url_port}" ]] && { [[ "${url_scheme}" == "https" ]] && url_port=443 || url_port=80; }
+  # Strip brackets to get the bare address for TCP connect calls.
+  url_host_addr="${url_host#\[}"
+  url_host_addr="${url_host_addr%\]}"
 }
 
 # Emit :PORT only for non-default ports (used in Host header and URL reconstruction).
@@ -242,9 +251,9 @@ resolve_url() {
 # -- Connection management --
 open_connection() {
   if [[ "${url_scheme}" == "https" ]]; then
-    _tls_connect "${url_host}" "${url_port}"
+    _tls_connect "${url_host_addr}" "${url_port}"
   else
-    _tcp_connect "${url_host}" "${url_port}"
+    _tcp_connect "${url_host_addr}" "${url_port}"
   fi
 }
 
