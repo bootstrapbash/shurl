@@ -1,5 +1,5 @@
 #!/bin/bash
-# http.bash — minimal HTTP/HTTPS client.
+# shurl — minimal HTTP/HTTPS client.
 # Flags follow curl conventions; run --help for usage.
 # Requires bash 4.1+ or zsh 5.x. On macOS the bootstrap below auto-selects
 # zsh (the default shell) when no suitable bash is installed.
@@ -27,7 +27,7 @@ if [[ -z "${_HTTP_SHELL_SELECTED}" ]]; then
     if command -v zsh &>/dev/null; then
       _HTTP_SHELL_SELECTED=zsh exec zsh -- "$0" "$@"
     fi
-    printf 'http.bash: needs bash 4.1+ or zsh 5.x; neither found\n' >&2
+    printf 'shurl: needs bash 4.1+ or zsh 5.x; neither found\n' >&2
     exit 1
   fi
 fi
@@ -35,7 +35,7 @@ fi
 # -- Shell detection and zsh-specific setup --
 [[ -n "${ZSH_VERSION}" ]] && _IS_ZSH=1 || _IS_ZSH=''
 if [[ -n "${_IS_ZSH}" ]]; then
-  zmodload zsh/net/tcp || { printf 'http.bash: zsh/net/tcp module required\n' >&2; exit 1; }
+  zmodload zsh/net/tcp || { printf 'shurl: zsh/net/tcp module required\n' >&2; exit 1; }
 fi
 
 set -o pipefail
@@ -43,13 +43,13 @@ set -o pipefail
 opt_max_redirs=10
 opt_headers=()
 
-die()  { [[ -z "${opt_silent}" ]] && printf 'http.bash: %s\n' "$*" >&2; exit 1; }
+die()  { [[ -z "${opt_silent}" ]] && printf 'shurl: %s\n' "$*" >&2; exit 1; }
 log()  { [[ -z "${opt_silent}" ]] && printf '%s\n' "$*" >&2; return 0; }
 vlog() { [[ -n "${opt_verbose}" && -z "${opt_silent}" ]] && printf '%s\n' "$*" >&2; return 0; }
 
 usage() {
   printf '%s\n' \
-    'Usage: http.bash [OPTIONS] URL' \
+    'Usage: shurl [OPTIONS] URL' \
     '' \
     'Minimal HTTP/HTTPS client (bash/zsh built-ins + openssl for HTTPS).' \
     'Flags follow curl conventions.' \
@@ -297,7 +297,7 @@ send_request() {
   printf 'Accept-Encoding: identity\r\n' >&"${conn_write_fd}"
   vlog '> Accept-Encoding: identity'
 
-  local user_agent="${opt_agent:-http.bash/1.0}"
+  local user_agent="${opt_agent:-shurl/1.0}"
   printf 'User-Agent: %s\r\n' "${user_agent}" >&"${conn_write_fd}"
   vlog "> User-Agent: ${user_agent}"
 

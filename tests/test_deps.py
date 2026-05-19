@@ -1,5 +1,5 @@
 """
-Verify that http.bash only uses the declared external dependencies.
+Verify that shurl only uses the declared external dependencies.
 
 Runs the script with PATH restricted to a temp directory containing only
 symlinks to the allowed binaries.  If the script invokes anything else it
@@ -29,9 +29,9 @@ def _restricted_env(tmp_path, *allowed_names: str) -> dict:
     return {**os.environ, "PATH": str(bin_dir)}
 
 
-def _run(http_bash, env, *args, timeout=10):
+def _run(shurl_script, env, *args, timeout=10):
     return subprocess.run(
-        ["bash", http_bash, *args],
+        ["bash", shurl_script, *args],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -43,16 +43,16 @@ def _run(http_bash, env, *args, timeout=10):
 # Plain HTTP: only cat should be needed at runtime
 # ---------------------------------------------------------------------------
 
-def test_plain_http_works_with_only_cat(http_bash, http_server, tmp_path):
+def test_plain_http_works_with_only_cat(shurl_script, http_server, tmp_path):
     env = _restricted_env(tmp_path, "bash", "cat")
-    r = _run(http_bash, env, f"{http_server.url}/get")
+    r = _run(shurl_script, env, f"{http_server.url}/get")
     assert r.returncode == 0
     assert "hello world" in r.stdout
 
 
-def test_plain_http_post_works_with_only_cat(http_bash, http_server, tmp_path):
+def test_plain_http_post_works_with_only_cat(shurl_script, http_server, tmp_path):
     env = _restricted_env(tmp_path, "bash", "cat")
-    r = _run(http_bash, env, "-d", "x=1", f"{http_server.url}/echo-body")
+    r = _run(shurl_script, env, "-d", "x=1", f"{http_server.url}/echo-body")
     assert r.returncode == 0
     assert r.stdout == "x=1"
 
@@ -61,17 +61,17 @@ def test_plain_http_post_works_with_only_cat(http_bash, http_server, tmp_path):
 # HTTPS: requires openssl (and cat for body)
 # ---------------------------------------------------------------------------
 
-def test_https_works_with_openssl_and_cat(http_bash, https_server, tmp_path):
+def test_https_works_with_openssl_and_cat(shurl_script, https_server, tmp_path):
     env = _restricted_env(tmp_path, "bash", "openssl", "cat")
-    r = _run(http_bash, env, f"{https_server.url}/get")
+    r = _run(shurl_script, env, f"{https_server.url}/get")
     assert r.returncode == 0
     assert "hello world" in r.stdout
 
 
-def test_https_fails_without_openssl(http_bash, https_server, tmp_path):
+def test_https_fails_without_openssl(shurl_script, https_server, tmp_path):
     """HTTPS should fail with a clear error when openssl is absent."""
     env = _restricted_env(tmp_path, "bash", "cat")
-    r = _run(http_bash, env, f"{https_server.url}/get")
+    r = _run(shurl_script, env, f"{https_server.url}/get")
     assert r.returncode != 0
     assert "openssl" in r.stderr
 
@@ -80,15 +80,15 @@ def test_https_fails_without_openssl(http_bash, https_server, tmp_path):
 # Basic auth: requires openssl for base64 encoding
 # ---------------------------------------------------------------------------
 
-def test_basic_auth_works_with_openssl(http_bash, http_server, tmp_path):
+def test_basic_auth_works_with_openssl(shurl_script, http_server, tmp_path):
     env = _restricted_env(tmp_path, "bash", "openssl", "cat")
-    r = _run(http_bash, env, "-u", "user:pass", f"{http_server.url}/get")
+    r = _run(shurl_script, env, "-u", "user:pass", f"{http_server.url}/get")
     assert r.returncode == 0
 
 
-def test_basic_auth_fails_without_openssl(http_bash, http_server, tmp_path):
+def test_basic_auth_fails_without_openssl(shurl_script, http_server, tmp_path):
     """Basic auth base64 encoding should fail clearly when openssl is absent."""
     env = _restricted_env(tmp_path, "bash", "cat")
-    r = _run(http_bash, env, "-u", "user:pass", f"{http_server.url}/get")
+    r = _run(shurl_script, env, "-u", "user:pass", f"{http_server.url}/get")
     assert r.returncode != 0
     assert "openssl" in r.stderr

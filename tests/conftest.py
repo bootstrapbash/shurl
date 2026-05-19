@@ -1,11 +1,11 @@
 """
-Shared fixtures for http.bash tests.
+Shared fixtures for shurl tests.
 
 Provides:
   - http_server:  a session-scoped HTTP/1.0 test server with well-known endpoints.
   - https_server: a session-scoped HTTPS test server using a self-signed cert.
-  - http_bash:    path to the http.bash script under test.
-  - run:          helper that invokes http.bash as a subprocess.
+  - shurl_script:    path to the shurl script under test.
+  - run:          helper that invokes shurl as a subprocess.
 """
 from __future__ import annotations
 
@@ -27,35 +27,35 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _find_script() -> str:
-    """Return the path to http.bash, handling both Bazel and direct invocation."""
+    """Return the path to shurl, handling both Bazel and direct invocation."""
     # Bazel sets TEST_SRCDIR to the runfiles tree root.
     srcdir = os.environ.get("TEST_SRCDIR", "")
     workspace = os.environ.get("TEST_WORKSPACE", "_main")
     if srcdir:
         for candidate in [
-            os.path.join(srcdir, workspace, "http.bash"),
-            os.path.join(srcdir, "_main", "http.bash"),
-            os.path.join(srcdir, "http_bash", "http.bash"),
+            os.path.join(srcdir, workspace, "shurl"),
+            os.path.join(srcdir, "_main", "shurl"),
+            os.path.join(srcdir, "shurl_script", "shurl"),
         ]:
             if os.path.isfile(candidate):
                 return candidate
     # Direct pytest invocation from the repo root or tests/ directory.
     here = os.path.dirname(os.path.abspath(__file__))
     for candidate in [
-        os.path.join(here, "..", "http.bash"),
-        os.path.join(here, "http.bash"),
+        os.path.join(here, "..", "shurl"),
+        os.path.join(here, "shurl"),
     ]:
         path = os.path.realpath(candidate)
         if os.path.isfile(path):
             return path
-    raise FileNotFoundError("http.bash not found; run via Bazel or from the repo root")
+    raise FileNotFoundError("shurl not found; run via Bazel or from the repo root")
 
 
 _SCRIPT_PATH: str = _find_script()
 
 
 @pytest.fixture(scope="session")
-def http_bash() -> str:
+def shurl_script() -> str:
     return _SCRIPT_PATH
 
 
@@ -220,7 +220,7 @@ def _create_self_signed_cert(tmpdir: str) -> tuple[str, str]:
 
 @pytest.fixture(scope="session")
 def https_server() -> ServerInfo:
-    tmpdir = tempfile.mkdtemp(prefix="http_bash_test_")
+    tmpdir = tempfile.mkdtemp(prefix="shurl_test_")
     cert, key = _create_self_signed_cert(tmpdir)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(cert, key)
@@ -231,12 +231,12 @@ def https_server() -> ServerInfo:
 @pytest.fixture(scope="session")
 def https_cert_dir(https_server) -> str:
     """Return the temp dir where the HTTPS server's self-signed cert lives."""
-    # The cert was created in a temp dir with prefix http_bash_test_.
+    # The cert was created in a temp dir with prefix shurl_test_.
     # We need to find it; easier to store on the fixture.
     # Re-derive: the https_server fixture creates the cert in the same call.
     # Workaround: scan /tmp for the cert dir.
     for entry in os.scandir(tempfile.gettempdir()):
-        if entry.name.startswith("http_bash_test_") and entry.is_dir():
+        if entry.name.startswith("shurl_test_") and entry.is_dir():
             if os.path.isfile(os.path.join(entry.path, "cert.pem")):
                 return entry.path
     raise RuntimeError("Could not find HTTPS cert dir")
@@ -253,12 +253,12 @@ class RunResult(NamedTuple):
 
 
 @pytest.fixture(scope="session")
-def run(http_bash):
-    """Return a callable that runs http.bash with the given args."""
+def run(shurl_script):
+    """Return a callable that runs shurl with the given args."""
 
     def _run(*args, input_data=None, timeout=10) -> RunResult:
         result = subprocess.run(
-            ["bash", http_bash, *args],
+            ["bash", shurl_script, *args],
             capture_output=True,
             text=True,
             input=input_data,
@@ -270,8 +270,8 @@ def run(http_bash):
 
 
 @pytest.fixture(scope="session")
-def zsh_run(http_bash):
-    """Return a callable that runs http.bash under zsh.
+def zsh_run(shurl_script):
+    """Return a callable that runs shurl under zsh.
 
     Sets _HTTP_SHELL_SELECTED=zsh so the bootstrap is skipped and the
     script runs directly under zsh without re-exec overhead.
@@ -280,7 +280,7 @@ def zsh_run(http_bash):
     def _run(*args, input_data=None, timeout=10) -> RunResult:
         env = {**os.environ, "_HTTP_SHELL_SELECTED": "zsh"}
         result = subprocess.run(
-            ["zsh", http_bash, *args],
+            ["zsh", shurl_script, *args],
             capture_output=True,
             text=True,
             input=input_data,

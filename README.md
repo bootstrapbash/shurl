@@ -1,10 +1,10 @@
-# http.bash
+# shurl
 
 A minimal HTTP/HTTPS client implemented as a single bash script.
 
 ## Introduction
 
-`http.bash` lets you fetch URLs from the command line using almost nothing but
+`shurl` lets you fetch URLs from the command line using almost nothing but
 bash itself. It covers the everyday use cases — GET, POST, redirects, basic
 auth, custom headers, HTTPS — without pulling in curl, wget, or any other
 compiled HTTP library.
@@ -30,7 +30,7 @@ it runs on any host that has bash 4.1+ or zsh 5.x — including stock macOS.
      drops null bytes (`\0`), making it unsuitable for arbitrary binary data.
 
 3. **Single file, readable source.** The entire implementation lives in
-   `http.bash`. No build step, no compiled components, no install. Copy the
+   `shurl`. No build step, no compiled components, no install. Copy the
    file and run it. The source is kept small but not minified; clarity is
    preferred over brevity when the two conflict.
 
@@ -63,7 +63,7 @@ the best available shell:
 1. If a bash 4.1+ binary is found in `PATH` (e.g. from Homebrew: `brew install bash`), it is preferred.
 2. Otherwise, zsh is used — which works out of the box on any stock macOS system.
 
-No manual shell selection is needed; just run `./http.bash` as usual.
+No manual shell selection is needed; just run `./shurl` as usual.
 
 **macOS dependencies for development:**
 
@@ -78,8 +78,8 @@ Runtime dependencies (`openssl`, `cat`, `zsh`) are pre-installed on macOS.
 ## Installation
 
 ```bash
-curl -O https://raw.githubusercontent.com/.../http.bash
-chmod +x http.bash
+curl -O https://raw.githubusercontent.com/.../shurl
+chmod +x shurl
 ```
 
 Or copy the single file to wherever you need it.
@@ -87,7 +87,7 @@ Or copy the single file to wherever you need it.
 ## Usage
 
 ```
-http.bash [OPTIONS] URL
+shurl [OPTIONS] URL
 ```
 
 ### Options
@@ -115,43 +115,43 @@ http.bash [OPTIONS] URL
 ### Basic GET (HTTP)
 
 ```bash
-./http.bash http://example.com/
+./shurl http://example.com/
 ```
 
 ### Basic GET (HTTPS)
 
 ```bash
-./http.bash https://example.com/
+./shurl https://example.com/
 ```
 
 ### Save body to a file
 
 ```bash
-./http.bash -o index.html http://example.com/
+./shurl -o index.html http://example.com/
 ```
 
 ### Verbose output (see request/response headers)
 
 ```bash
-./http.bash -v http://httpbin.org/get
+./shurl -v http://httpbin.org/get
 ```
 
 ### Follow redirects
 
 ```bash
-./http.bash -L http://httpbin.org/redirect/3
+./shurl -L http://httpbin.org/redirect/3
 ```
 
 ### POST form data
 
 ```bash
-./http.bash -d "name=alice&role=admin" http://httpbin.org/post
+./shurl -d "name=alice&role=admin" http://httpbin.org/post
 ```
 
 ### POST JSON
 
 ```bash
-./http.bash -X POST \
+./shurl -X POST \
   -H "Content-Type: application/json" \
   -d '{"name":"alice"}' \
   http://httpbin.org/post
@@ -160,13 +160,13 @@ http.bash [OPTIONS] URL
 ### HTTP Basic auth
 
 ```bash
-./http.bash -u alice:secret http://httpbin.org/basic-auth/alice/secret
+./shurl -u alice:secret http://httpbin.org/basic-auth/alice/secret
 ```
 
 ### Custom headers
 
 ```bash
-./http.bash -H "Accept: application/json" \
+./shurl -H "Accept: application/json" \
             -H "X-Request-ID: abc123" \
             http://httpbin.org/headers
 ```
@@ -174,25 +174,25 @@ http.bash [OPTIONS] URL
 ### HEAD request (response headers only)
 
 ```bash
-./http.bash -I http://example.com/
+./shurl -I http://example.com/
 ```
 
 ### Dump response headers to a file
 
 ```bash
-./http.bash -D headers.txt http://example.com/
+./shurl -D headers.txt http://example.com/
 ```
 
 ### Set a connection timeout
 
 ```bash
-./http.bash --connect-timeout 5 http://slow.example.com/
+./shurl --connect-timeout 5 http://slow.example.com/
 ```
 
 ### Limit redirects
 
 ```bash
-./http.bash -L --max-redirs 2 http://example.com/redirect-chain
+./shurl -L --max-redirs 2 http://example.com/redirect-chain
 ```
 
 ## Notes

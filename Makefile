@@ -1,5 +1,5 @@
 SHELL   := bash
-SCRIPT  := http.bash
+SCRIPT  := shurl
 PYTHON  := $(shell if [ -x .venv/bin/python3 ]; then echo .venv/bin/python3; else echo python3; fi)
 PYTEST  := $(PYTHON) -m pytest
 TESTS   := tests/test_get.py tests/test_errors.py tests/test_cli.py \

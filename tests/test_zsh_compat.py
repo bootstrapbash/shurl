@@ -1,5 +1,5 @@
 """
-Zsh compatibility tests for http.bash.
+Zsh compatibility tests for shurl.
 
 Runs a representative cross-section of the test suite under zsh to confirm
 parity with the bash path. Automatically skipped if zsh is not on PATH.
