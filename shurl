@@ -72,7 +72,7 @@ usage() {
     '' \
     'External dependencies:' \
     '  openssl  HTTPS and -u basic auth' \
-    '  cat      Binary-safe body output' \
+    '  cat      binary-safe body output' \
     >&2
 }
 
