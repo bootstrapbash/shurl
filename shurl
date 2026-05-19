@@ -112,7 +112,12 @@ _tcp_connect() {
     ztcp "$1" "$2" || die "Could not connect to $1:$2"
     conn_read_fd="${REPLY}"; conn_write_fd="${REPLY}"
   else
-    exec 3<>"/dev/tcp/$1/$2" || die "Could not connect to $1:$2"
+    # Redirect stderr to suppress bash's internal /dev/tcp error; our die() provides the message.
+    exec {_tcp_stderr}>&2 2>/dev/null
+    exec 3<>"/dev/tcp/$1/$2"
+    local _tcp_rc=$?
+    exec 2>&"${_tcp_stderr}" {_tcp_stderr}>&-
+    [[ ${_tcp_rc} -eq 0 ]] || die "Could not connect to $1:$2"
     conn_read_fd=3; conn_write_fd=3
   fi
   conn_is_tls=''
@@ -169,6 +174,7 @@ while [[ $# -gt 0 ]]; do
     -H) [[ $# -lt 2 ]] && die "-H requires an argument"
         opt_headers+=("$2");    shift 2 ;;
     -u) [[ $# -lt 2 ]] && die "-u requires an argument"
+        [[ "$2" == *:* ]] || die "-u requires user:pass format"
         opt_auth="$2";          shift 2 ;;
     -X) [[ $# -lt 2 ]] && die "-X requires an argument"
         opt_method="$2";        shift 2 ;;
@@ -182,6 +188,7 @@ while [[ $# -gt 0 ]]; do
         opt_referer="$2";       shift 2 ;;
     --max-redirs)
         [[ $# -lt 2 ]] && die "--max-redirs requires an argument"
+        [[ "$2" =~ ^[0-9]+$ ]] || die "--max-redirs requires a non-negative integer"
         opt_max_redirs="$2";    shift 2 ;;
     --connect-timeout)
         [[ $# -lt 2 ]] && die "--connect-timeout requires an argument"
@@ -342,6 +349,8 @@ read_status_line() {
   if ! IFS= read -r "${timeout_flag[@]}" -u "${conn_read_fd}" raw_line; then
     [[ -n "${opt_connect_timeout}" ]] \
       && die "Timed out waiting for response from ${url_host}"
+    [[ -n "${conn_is_tls}" ]] \
+      && die "TLS handshake failed or ${url_host} is not an HTTPS server"
     die "Connection closed before status line received"
   fi
   local status_line="${raw_line%$'\r'}"

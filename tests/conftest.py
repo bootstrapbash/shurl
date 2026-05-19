@@ -101,6 +101,10 @@ class _TestHandler(BaseHTTPRequestHandler):
             self._send(200, body)
         elif route == "/notfound":
             self._send(404, b"Not Found")
+        elif route == "/unauthorized":
+            self._send(401, b"Unauthorized")
+        elif route == "/forbidden":
+            self._send(403, b"Forbidden")
         elif route == "/servererror":
             self._send(500, b"Internal Server Error")
         elif route == "/redirect301-to-echo":
