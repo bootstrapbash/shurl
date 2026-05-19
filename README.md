@@ -124,6 +124,15 @@ shurl [OPTIONS] URL
 ./shurl https://example.com/
 ```
 
+### IPv6 addresses
+
+Use standard bracket notation:
+
+```bash
+./shurl http://[::1]/
+./shurl http://[::1]:8080/api
+```
+
 ### Save body to a file
 
 ```bash
