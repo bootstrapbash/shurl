@@ -29,7 +29,7 @@ def test_redirect_with_L_follows(run, http_server, code, endpoint):
 
 
 def test_redirect_chain(run, http_server):
-    """301 → 302 → 200."""
+    """301 -> 302 -> 200."""
     r = run("-L", f"{http_server.url}/chain1")
     assert r.returncode == 0
     assert r.stdout == "hello world\n"
@@ -63,7 +63,7 @@ def test_relative_location(run, http_server):
 
 def test_301_switches_to_get(run, http_server):
     """301 redirect changes method to GET (curl behaviour)."""
-    # POST to /redirect301 → redirect → GET /get
+    # POST to /redirect301 -> redirect -> GET /get
     r = run("-L", "-X", "POST", f"{http_server.url}/redirect301")
     assert r.returncode == 0
     # /get endpoint echoes body; after 301+method-change it should be GET

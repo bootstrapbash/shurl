@@ -5,15 +5,15 @@ A minimal HTTP/HTTPS client implemented as a single bash script.
 ## Introduction
 
 `shurl` lets you fetch URLs from the command line using almost nothing but
-bash itself. It covers the everyday use cases — GET, POST, redirects, basic
-auth, custom headers, HTTPS — without pulling in curl, wget, or any other
+bash itself. It covers the everyday use cases - GET, POST, redirects, basic
+auth, custom headers, HTTPS - without pulling in curl, wget, or any other
 compiled HTTP library.
 
 The main use case is environments where you need to transfer a small, portable
 tool over a slow or restricted link and then use it immediately: embedded
 systems, minimal containers, CI bootstrap stages, and so on. A single script
 is easy to copy with `scp`, embed in a heredoc, or paste into a terminal, and
-it runs on any host that has bash 4.1+ or zsh 5.x — including stock macOS.
+it runs on any host that has bash 4.1+ or zsh 5.x - including stock macOS.
 
 ## Design principles
 
@@ -24,9 +24,9 @@ it runs on any host that has bash 4.1+ or zsh 5.x — including stock macOS.
 
 2. **Minimal, deliberate exceptions.** Two external dependencies are
    unavoidable:
-   - `openssl` — required for TLS (HTTPS) and for base64-encoding Basic auth
+   - `openssl` - required for TLS (HTTPS) and for base64-encoding Basic auth
      credentials. Bash has no native TLS support.
-   - `cat` — required for binary-safe body transfer. Bash's `read` silently
+   - `cat` - required for binary-safe body transfer. Bash's `read` silently
      drops null bytes (`\0`), making it unsuitable for arbitrary binary data.
 
 3. **Single file, readable source.** The entire implementation lives in
@@ -50,9 +50,9 @@ it runs on any host that has bash 4.1+ or zsh 5.x — including stock macOS.
 
 ## Requirements
 
-- **bash 4.1+** *or* **zsh 5.x** — the script works with either shell
-- `openssl` — for HTTPS and `-u` basic auth (optional for plain HTTP)
-- `cat` — for binary body output (present on virtually every Unix system)
+- **bash 4.1+** *or* **zsh 5.x** - the script works with either shell
+- `openssl` - for HTTPS and `-u` basic auth (optional for plain HTTP)
+- `cat` - for binary body output (present on virtually every Unix system)
 
 ### macOS
 
@@ -61,7 +61,7 @@ script detects the situation automatically at startup and re-execs under
 the best available shell:
 
 1. If a bash 4.1+ binary is found in `PATH` (e.g. from Homebrew: `brew install bash`), it is preferred.
-2. Otherwise, zsh is used — which works out of the box on any stock macOS system.
+2. Otherwise, zsh is used - which works out of the box on any stock macOS system.
 
 No manual shell selection is needed; just run `./shurl` as usual.
 
