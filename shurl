@@ -1,7 +1,7 @@
 #!/bin/bash
 # shurl - minimal HTTP/HTTPS client.
 # Flags follow curl conventions; run --help for usage.
-# Requires bash 4.1+ (prefered) or zsh 5.x (macos). 
+# Requires bash 4.1+ (prefered) or zsh 5.x (macos).
 # External deps (intentional exceptions to the shell-only rule):
 #   openssl - TLS (HTTPS) and base64 for -u auth
 #   cat     - binary-safe body transfer (shell read drops null bytes)
@@ -136,9 +136,9 @@ _tls_connect() {
     exec {conn_write_fd}>&p
   else
     # bash (0-indexed): COPROC[0]=read(stdout), COPROC[1]=write(stdin).
-    local _read_fd
-    eval "exec {_read_fd}<&${COPROC[0]}"
-    conn_read_fd="${_read_fd}"; conn_write_fd="${COPROC[1]}"
+    # {var}<&N (bash 4.1+): allocates a free FD, dups from N, stores number in var.
+    exec {conn_read_fd}<&"${COPROC[0]}"
+    conn_write_fd="${COPROC[1]}"
   fi
   conn_is_tls=1
 }
@@ -147,18 +147,10 @@ _tls_connect() {
 # syntax; use {var}>file instead which allocates a FD dynamically.
 _DUMP_FD=''
 _open_write_fd() {
-  if [[ -n "${_IS_ZSH}" ]]; then
-    exec {_DUMP_FD}>"$1"
-  else
-    eval "exec {_DUMP_FD}>\"$1\""
-  fi
+  exec {_DUMP_FD}>"$1"
 }
 _close_write_fd() {
-  if [[ -n "${_IS_ZSH}" ]]; then
-    exec {_DUMP_FD}>&-
-  else
-    eval "exec ${_DUMP_FD}>&-"
-  fi
+  exec {_DUMP_FD}>&-
 }
 
 # -- Argument parsing --
@@ -263,9 +255,9 @@ close_connection() {
       wait "${tls_pid}" 2>/dev/null || true
       { exec {conn_read_fd}<&-; } 2>/dev/null || true
     else
-      { eval "exec ${conn_write_fd}>&-"; } 2>/dev/null || true
+      { exec {conn_write_fd}>&-; } 2>/dev/null || true
       wait "${tls_pid}" 2>/dev/null || true
-      { eval "exec ${conn_read_fd}<&-"; } 2>/dev/null || true
+      { exec {conn_read_fd}<&-; } 2>/dev/null || true
     fi
     tls_pid=''
   elif [[ -n "${_IS_ZSH}" ]]; then
