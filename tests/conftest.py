@@ -207,6 +207,23 @@ def _free_port_ipv6() -> int:
 
 
 @pytest.fixture(scope="session")
+def http_server_localhost(http_server) -> str:
+    """Base URL using the 'localhost' hostname, reusing the 127.0.0.1 server.
+
+    Skipped if 'localhost' does not resolve to 127.0.0.1 on this system
+    (e.g. it resolves to ::1 only), since the server is bound to 127.0.0.1.
+    """
+    try:
+        results = socket.getaddrinfo("localhost", None, socket.AF_INET)
+        addr = results[0][4][0]
+    except OSError:
+        pytest.skip("localhost does not resolve to an IPv4 address")
+    if addr != "127.0.0.1":
+        pytest.skip(f"localhost resolves to {addr}, not 127.0.0.1")
+    return f"http://localhost:{http_server.port}"
+
+
+@pytest.fixture(scope="session")
 def http_server_ipv6() -> ServerInfo:
     """HTTP server bound to ::1.  Skipped if IPv6 loopback is unavailable."""
     try:

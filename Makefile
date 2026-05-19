@@ -3,7 +3,8 @@ SCRIPT  := shurl
 PYTHON  := $(shell if [ -x .venv/bin/python3 ]; then echo .venv/bin/python3; else echo python3; fi)
 PYTEST  := $(PYTHON) -m pytest
 TESTS   := tests/test_get.py tests/test_errors.py tests/test_cli.py \
-           tests/test_redirects.py tests/test_https.py
+           tests/test_redirects.py tests/test_https.py \
+           tests/test_url_formats.py tests/test_network.py
 
 .PHONY: all test test-zsh test-deps lint check clean
 
