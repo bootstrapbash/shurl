@@ -111,6 +111,14 @@ def test_auth_missing_colon(run, http_server):
     assert "user:pass" in r.stderr
 
 
+def test_option_after_url(run, http_server):
+    """Options after the URL are rejected."""
+    r = run(f"{http_server.url}/get", "-v")
+    assert r.returncode != 0
+    assert "option after URL" in r.stderr
+    assert "-v" in r.stderr
+
+
 # ---------------------------------------------------------------------------
 # Output suppression
 # ---------------------------------------------------------------------------

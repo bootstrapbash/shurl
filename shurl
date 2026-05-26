@@ -202,6 +202,13 @@ done
 
 [[ $# -lt 1 ]] && { usage; exit 1; }
 url="$1"
+shift
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    -*) die "option after URL: $1" ;;
+    *)  die "unexpected argument after URL: $1" ;;
+  esac
+fi
 
 if [[ -n "${opt_head}" ]]; then
   method="HEAD"
