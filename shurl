@@ -59,7 +59,8 @@ usage() {
     '  -I              HEAD request: show response headers, no body' \
     '  -L              Follow redirects' \
     '  -H "Name: Val"  Add request header (repeatable)' \
-    '  -s              Silent: suppress all stderr output' \
+    '  -s              Silent: suppress progress meter and all stderr output' \
+    '  -#, --progress-bar  Display a progress bar instead of stats' \
     '  -u user:pass    HTTP Basic auth' \
     '  -X METHOD       HTTP method (default: GET, or POST when -d is given)' \
     '  -d <data>       Request body (implies POST unless -X overrides)' \
@@ -162,12 +163,38 @@ _close_write_fd() {
   exec {_DUMP_FD}>&-
 }
 
+# _file_size - get current byte count of a file being written.
+# zsh: takes a file path, uses zstat builtin.
+# bash (Linux): takes a PID, reads write-offset from /proc/<pid>/fdinfo/1.
+if [[ -n "${_IS_ZSH}" ]]; then
+  "zmod""load" "zsh/stat" 2>/dev/null
+  _file_size() { zstat +size "$1" 2>/dev/null || echo 0; }
+else
+  _file_size() {
+    local fdinfo_line
+    while IFS= read -r fdinfo_line; do
+      case "${fdinfo_line}" in
+        pos:*)
+          fdinfo_line="${fdinfo_line#pos:}"
+          # Trim leading whitespace (bash extglob not guaranteed).
+          while [[ "${fdinfo_line}" == [[:space:]]* ]]; do
+            fdinfo_line="${fdinfo_line#?}"
+          done
+          echo "${fdinfo_line}"
+          return ;;
+      esac
+    done < "/proc/$1/fdinfo/1" 2>/dev/null
+    echo 0
+  }
+fi
+
 # -- Argument parsing --
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -v) opt_verbose=1;  shift ;;
     -I) opt_head=1;     shift ;;
     -s) opt_silent=1;   shift ;;
+    -\#|--progress-bar) opt_progress_bar=1; shift ;;
     -L) opt_follow=1;   shift ;;
     -o) [[ $# -lt 2 ]] && die "-o requires an argument"
         opt_output="$2";        shift 2 ;;
@@ -219,6 +246,150 @@ elif [[ -n "${opt_data}" ]]; then
 else
   method="GET"
 fi
+
+# -- Progress mode selection --
+_progress_mode=''
+if [[ -z "${opt_silent}" && -n "${opt_output}" && -t 2 ]]; then
+  if [[ -n "${opt_progress_bar}" ]]; then
+    _progress_mode='bar'
+  else
+    _progress_mode='stats'
+  fi
+fi
+
+# -- Progress display --
+
+# Size display: no decimals (e.g. 296M, 15k, 0).
+_human_size() {
+  local bytes="$1"
+  if [[ "${bytes}" -ge 1073741824 ]]; then
+    printf '%dG' "$(( bytes / 1073741824 ))"
+  elif [[ "${bytes}" -ge 1048576 ]]; then
+    printf '%dM' "$(( bytes / 1048576 ))"
+  elif [[ "${bytes}" -ge 1024 ]]; then
+    printf '%dk' "$(( bytes / 1024 ))"
+  else
+    printf '%d' "${bytes}"
+  fi
+}
+
+# Speed display: one decimal for M/G (e.g. 10.1M, 512k, 0).
+_human_speed() {
+  local bytes="$1"
+  if [[ "${bytes}" -ge 1073741824 ]]; then
+    printf '%d.%dG' "$(( bytes / 1073741824 ))" "$(( (bytes % 1073741824) * 10 / 1073741824 ))"
+  elif [[ "${bytes}" -ge 1048576 ]]; then
+    printf '%d.%dM' "$(( bytes / 1048576 ))" "$(( (bytes % 1048576) * 10 / 1048576 ))"
+  elif [[ "${bytes}" -ge 1024 ]]; then
+    printf '%dk' "$(( bytes / 1024 ))"
+  else
+    printf '%d' "${bytes}"
+  fi
+}
+
+_format_time() {
+  local secs="$1"
+  if [[ "${secs}" -lt 0 ]]; then
+    printf '--:--:--'
+  else
+    printf '%d:%02d:%02d' "$(( secs / 3600 ))" "$(( (secs % 3600) / 60 ))" "$(( secs % 60 ))"
+  fi
+}
+
+_progress_start() {
+  _progress_start_secs="${SECONDS}"
+}
+
+_progress_update() {
+  [[ -z "${_progress_mode}" ]] && return
+  local received="$1" total="$2"
+  local elapsed=$(( SECONDS - _progress_start_secs ))
+  [[ "${elapsed}" -lt 1 ]] && elapsed=1
+  local speed=$(( received / elapsed ))
+
+  if [[ "${_progress_mode}" == "bar" ]]; then
+    local cols="${COLUMNS:-80}"
+    local suffix
+    if [[ "${total}" -gt 0 ]]; then
+      local pct_x10=$(( received * 1000 / total ))
+      local pct_whole=$(( pct_x10 / 10 ))
+      local pct_frac=$(( pct_x10 % 10 ))
+      suffix=$(printf ' %3d.%d%% %s %s/s' "${pct_whole}" "${pct_frac}" "$(_human_size "${received}")" "$(_human_speed "${speed}")")
+    else
+      suffix=$(printf ' %s %s/s' "$(_human_size "${received}")" "$(_human_speed "${speed}")")
+    fi
+    local bar_width=$(( cols - ${#suffix} - 3 ))
+    [[ "${bar_width}" -lt 10 ]] && bar_width=10
+    local filled=0
+    if [[ "${total}" -gt 0 ]]; then
+      filled=$(( received * bar_width / total ))
+      [[ "${filled}" -gt "${bar_width}" ]] && filled="${bar_width}"
+    fi
+    local empty=$(( bar_width - filled ))
+    local bar_str=''
+    local idx=0
+    while [[ "${idx}" -lt "${filled}" ]]; do
+      bar_str="${bar_str}#"
+      (( idx++ ))
+    done
+    if [[ "${empty}" -gt 0 && "${filled}" -lt "${bar_width}" ]]; then
+      bar_str="${bar_str}>"
+      idx=1
+      while [[ "${idx}" -lt "${empty}" ]]; do
+        bar_str="${bar_str} "
+        (( idx++ ))
+      done
+    fi
+    printf '\r[%s]%s' "${bar_str}" "${suffix}" >&2
+  else
+    # Stats mode: curl-style table
+    if [[ -z "${_progress_header_shown}" ]]; then
+      printf '  %% Total    %% Received  Average Speed   Time    Time     Time  Current\n' >&2
+      printf '                          Dload          Total   Spent    Left  Speed\n' >&2
+      _progress_header_shown=1
+    fi
+    # Current speed: update baseline each time a new second has elapsed.
+    if [[ "${elapsed}" -gt "${_cur_speed_elapsed}" ]]; then
+      local dt=$(( elapsed - _cur_speed_elapsed ))
+      _cur_speed=$(( (received - _cur_speed_received) / dt ))
+      _cur_speed_received="${received}"
+      _cur_speed_elapsed="${elapsed}"
+    fi
+    local time_total=-1 time_left=-1
+    local time_spent=-1
+    if [[ "${received}" -gt 0 ]]; then
+      time_spent="${elapsed}"
+    fi
+    if [[ "${total}" -gt 0 ]]; then
+      local pct=$(( received * 100 / total ))
+      if [[ "${speed}" -gt 0 ]]; then
+        time_total=$(( total / speed ))
+        time_left=$(( (total - received) / speed ))
+      fi
+      printf '\r%3d %5s  %3d %5s  %5s  %8s %8s %8s %5s' \
+        "${pct}" "$(_human_size "${total}")" \
+        "${pct}" "$(_human_size "${received}")" \
+        "$(_human_speed "${speed}")" \
+        "$(_format_time "${time_total}")" \
+        "$(_format_time "${time_spent}")" \
+        "$(_format_time "${time_left}")" \
+        "$(_human_speed "${_cur_speed}")" >&2
+    else
+      printf '\r  0     0    0     0      0  %8s %8s %8s %5s' \
+        "$(_format_time -1)" \
+        "$(_format_time "${time_spent}")" \
+        "$(_format_time -1)" \
+        "$(_human_speed "${_cur_speed}")" >&2
+    fi
+  fi
+}
+
+_progress_finish() {
+  [[ -z "${_progress_mode}" ]] && return
+  local received="$1" total="$2"
+  _progress_update "${received}" "${total}"
+  printf '\n' >&2
+}
 
 # -- URL parsing --
 parse_url() {
@@ -294,7 +465,7 @@ close_connection() {
   conn_is_tls=''
 }
 
-trap close_connection EXIT
+trap '_cleanup_progress_fifo; close_connection' EXIT
 
 # -- Request --
 send_request() {
@@ -375,6 +546,7 @@ read_status_line() {
 
 read_response_headers() {
   resp_location=''
+  resp_content_length=''
   local dump_fd=''
   if [[ -n "${opt_dump_headers}" ]]; then
     _open_write_fd "${opt_dump_headers}" \
@@ -393,15 +565,64 @@ read_response_headers() {
     if _regex "${header_line}" "${header_re}"; then
       header_name="$(_tolower "${_regex_groups[1]}")"
       [[ "${header_name}" == "location" ]] && resp_location="${_regex_groups[2]}"
+      [[ "${header_name}" == "content-length" ]] && resp_content_length="${_regex_groups[2]}"
     fi
   done
 
   [[ -n "${dump_fd}" ]] && _close_write_fd
 }
 
+# -- Body transfer with optional progress --
+_setup_progress_fifo() {
+  if [[ -n "${_progress_mode}" && -z "${_sleep_fifo}" ]]; then
+    _sleep_fifo="${TMPDIR:-/tmp}/shurl_sleep_$$"
+    mkfifo "${_sleep_fifo}" 2>/dev/null || _sleep_fifo=''
+  fi
+}
+_cleanup_progress_fifo() {
+  [[ -n "${_sleep_fifo}" ]] && rm -f "${_sleep_fifo}"
+}
+
+transfer_body() {
+  if [[ -z "${_progress_mode}" ]]; then
+    if [[ -n "${opt_output}" ]]; then
+      cat <&"${conn_read_fd}" > "${opt_output}" \
+        || die "Failed to write body to ${opt_output}"
+    else
+      cat <&"${conn_read_fd}"
+    fi
+    return
+  fi
+
+  _setup_progress_fifo
+  local total="${resp_content_length:-0}"
+
+  cat <&"${conn_read_fd}" > "${opt_output}" &
+  local cat_pid=$!
+
+  local received=0
+  while kill -0 "${cat_pid}" 2>/dev/null; do
+    if [[ -n "${_IS_ZSH}" ]]; then
+      received=$(_file_size "${opt_output}")
+    else
+      received=$(_file_size "${cat_pid}")
+    fi
+    _progress_update "${received}" "${total}"
+    if [[ -n "${_sleep_fifo}" ]]; then
+      read -r -t 0.25 _sleep_dummy <> "${_sleep_fifo}" 2>/dev/null || true
+    fi
+  done
+  wait "${cat_pid}" || die "Failed to write body to ${opt_output}"
+
+  [[ "${total}" -gt 0 ]] && received="${total}"
+  _progress_finish "${received}" "${total}"
+  _cleanup_progress_fifo
+}
+
 # -- Main loop --
 parse_url "${url}"
 redirs_left="${opt_max_redirs}"
+[[ -n "${_progress_mode}" ]] && _progress_start
 
 while true; do
   open_connection
@@ -410,15 +631,7 @@ while true; do
   read_response_headers
 
   if [[ "${resp_code}" -ge 200 && "${resp_code}" -lt 300 ]]; then
-    # cat for binary-safe transfer (shell read drops null bytes).
-    if [[ -z "${opt_head}" ]]; then
-      if [[ -n "${opt_output}" ]]; then
-        cat <&"${conn_read_fd}" > "${opt_output}" \
-          || die "Failed to write body to ${opt_output}"
-      else
-        cat <&"${conn_read_fd}"
-      fi
-    fi
+    [[ -z "${opt_head}" ]] && transfer_body
     close_connection
     exit 0
 
@@ -428,7 +641,12 @@ while true; do
     [[ "${redirs_left}" -le 0 ]] && die "Too many redirects (--max-redirs ${opt_max_redirs})"
     (( redirs_left-- )) || true
     new_url=$(resolve_url "${resp_location}")
-    log "Redirect [${resp_code}] -> ${new_url}"
+    if [[ -n "${_progress_mode}" ]]; then
+      _progress_update 0 0
+      printf '\n' >&2
+    else
+      log "Redirect [${resp_code}] -> ${new_url}"
+    fi
     close_connection
     url="${new_url}"
     parse_url "${url}"
