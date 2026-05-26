@@ -172,18 +172,19 @@ if [[ -n "${_IS_ZSH}" ]]; then
 else
   _file_size() {
     local fdinfo_line
-    while IFS= read -r fdinfo_line; do
-      case "${fdinfo_line}" in
-        pos:*)
-          fdinfo_line="${fdinfo_line#pos:}"
-          # Trim leading whitespace (bash extglob not guaranteed).
-          while [[ "${fdinfo_line}" == [[:space:]]* ]]; do
-            fdinfo_line="${fdinfo_line#?}"
-          done
-          echo "${fdinfo_line}"
-          return ;;
-      esac
-    done < "/proc/$1/fdinfo/1" 2>/dev/null
+    {
+      while IFS= read -r fdinfo_line; do
+        case "${fdinfo_line}" in
+          pos:*)
+            fdinfo_line="${fdinfo_line#pos:}"
+            while [[ "${fdinfo_line}" == [[:space:]]* ]]; do
+              fdinfo_line="${fdinfo_line#?}"
+            done
+            echo "${fdinfo_line}"
+            return ;;
+        esac
+      done < "/proc/$1/fdinfo/1"
+    } 2>/dev/null
     echo 0
   }
 fi
