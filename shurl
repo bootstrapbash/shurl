@@ -467,7 +467,7 @@ close_connection() {
   conn_is_tls=''
 }
 
-trap '_cleanup_progress_fifo; close_connection' EXIT
+trap close_connection EXIT
 
 # -- Request --
 send_request() {
@@ -575,15 +575,15 @@ read_response_headers() {
 }
 
 # -- Body transfer with optional progress --
-_setup_progress_fifo() {
-  if [[ -n "${_progress_mode}" && -z "${_sleep_fifo}" ]]; then
-    _sleep_fifo="${TMPDIR:-/tmp}/shurl_sleep_$$"
-    mkfifo "${_sleep_fifo}" 2>/dev/null || _sleep_fifo=''
-  fi
-}
-_cleanup_progress_fifo() {
-  [[ -n "${_sleep_fifo}" ]] && rm -f "${_sleep_fifo}"
-}
+# _poll_sleep - builtin-only ~0.25s pause between progress polls.
+# zsh: zselect from zsh/zselect module (centisecond timer).
+# bash: read with timeout from /dev/tty (progress requires a TTY anyway).
+if [[ -n "${_IS_ZSH}" ]]; then
+  "zmod""load" "zsh/zselect" 2>/dev/null
+  _poll_sleep() { zselect -t 25 2>/dev/null || true; }
+else
+  _poll_sleep() { read -t 0.25 _ < /dev/tty 2>/dev/null || true; }
+fi
 
 transfer_body() {
   if [[ -z "${_progress_mode}" ]]; then
@@ -596,7 +596,6 @@ transfer_body() {
     return
   fi
 
-  _setup_progress_fifo
   local total="${resp_content_length:-0}"
 
   cat <&"${conn_read_fd}" > "${opt_output}" &
@@ -610,15 +609,12 @@ transfer_body() {
       received=$(_file_size "${cat_pid}")
     fi
     _progress_update "${received}" "${total}"
-    if [[ -n "${_sleep_fifo}" ]]; then
-      read -r -t 0.25 _ <> "${_sleep_fifo}" 2>/dev/null || true
-    fi
+    _poll_sleep
   done
   wait "${cat_pid}" || die "Failed to write body to ${opt_output}"
 
   [[ "${total}" -gt 0 ]] && received="${total}"
   _progress_finish "${received}" "${total}"
-  _cleanup_progress_fifo
 }
 
 # -- Main loop --
