@@ -614,7 +614,7 @@ transfer_body() {
     fi
     _progress_update "${received}" "${total}"
     if [[ -n "${_sleep_fifo}" ]]; then
-      read -r -t 0.25 _sleep_dummy <> "${_sleep_fifo}" 2>/dev/null || true
+      read -r -t 0.25 _ <> "${_sleep_fifo}" 2>/dev/null || true
     fi
   done
   wait "${cat_pid}" || die "Failed to write body to ${opt_output}"
