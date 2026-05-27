@@ -19,6 +19,7 @@ import os
 import pty
 import shutil
 import subprocess
+import threading
 
 import pytest
 
@@ -48,23 +49,50 @@ def _run(shurl_script, env, *args, timeout=10):
 def _run_with_pty_stderr(shurl_script, env, *args, timeout=15):
     """Run shurl with a real PTY as stderr so -t 2 is true and progress mode fires.
 
-    stdout is discarded; body goes to a file via -o (passed in args).  Returns
-    the CompletedProcess (no stdout/stderr text since stderr goes to the pty).
+    stdout is discarded; body goes to a file via -o (passed in args).
+
+    A background thread drains the PTY master while the process runs.  This is
+    required: if nobody reads from the master the PTY buffer (~4 KB) fills up
+    and bash blocks mid-progress-update, hanging the test.
+
+    Returns (proc, pty_output_bytes).  pty_output_bytes contains everything the
+    subprocess wrote to stderr (progress updates, and any error messages such as
+    "bash: uname: command not found").
     """
     master_fd, slave_fd = pty.openpty()
+    pty_chunks: list[bytes] = []
+
+    def _drain():
+        try:
+            while True:
+                chunk = os.read(master_fd, 4096)
+                if not chunk:
+                    break
+                pty_chunks.append(chunk)
+        except OSError:
+            pass
+
+    drain_thread = threading.Thread(target=_drain, daemon=True)
+    slave_fd_to_close = slave_fd
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["bash", shurl_script, *args],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=slave_fd,
             env=env,
-            timeout=timeout,
         )
+        # Close our copy of slave_fd so the master gets EIO when the process exits.
+        os.close(slave_fd_to_close)
+        slave_fd_to_close = -1
+        drain_thread.start()
+        proc.wait(timeout=timeout)
     finally:
-        os.close(slave_fd)
+        if slave_fd_to_close >= 0:
+            os.close(slave_fd_to_close)
+        drain_thread.join(timeout=3.0)
         os.close(master_fd)
-    return result
+    return proc, b"".join(pty_chunks)
 
 
 # ---------------------------------------------------------------------------
@@ -129,25 +157,35 @@ def test_basic_auth_fails_without_openssl(shurl_script, http_server, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_progress_bar_no_extra_deps(shurl_script, http_server, tmp_path):
-    """Progress bar mode (-# -o) must not call any binaries beyond bash + cat."""
+    """Progress bar mode (-# -o) must not call any binaries beyond bash + cat.
+
+    Uses /slow-large (350ms hold before data) so the progress poll loop fires
+    before cat exits.  Checks the PTY output for 'not found' to catch any stray
+    binary that fails silently (exit-code swallowed by _poll_sleep's || true).
+    """
     env = _restricted_env(tmp_path, "bash", "cat")
     out_file = tmp_path / "body.out"
-    r = _run_with_pty_stderr(
+    proc, pty_output = _run_with_pty_stderr(
         shurl_script, env,
-        "-#", "-o", str(out_file), f"{http_server.url}/large",
+        "-#", "-o", str(out_file), f"{http_server.url}/slow-large",
         timeout=15,
     )
-    assert r.returncode == 0
-    assert out_file.stat().st_size == 1024 * 1024
+    assert proc.returncode == 0
+    assert out_file.stat().st_size == 64 * 1024
+    assert b"\r" in pty_output, "no progress output seen; poll loop did not run"
+    assert b"not found" not in pty_output, f"unexpected external command: {pty_output!r}"
 
 
 def test_stats_mode_no_extra_deps(shurl_script, http_server, tmp_path):
     """Stats progress mode (-o without -#) must not call any binaries beyond bash + cat."""
     env = _restricted_env(tmp_path, "bash", "cat")
     out_file = tmp_path / "body.out"
-    r = _run_with_pty_stderr(
+    proc, pty_output = _run_with_pty_stderr(
         shurl_script, env,
-        "-o", str(out_file), f"{http_server.url}/large",
+        "-o", str(out_file), f"{http_server.url}/slow-large",
+        timeout=15,
     )
-    assert r.returncode == 0
-    assert out_file.stat().st_size == 1024 * 1024
+    assert proc.returncode == 0
+    assert out_file.stat().st_size == 64 * 1024
+    assert b"\r" in pty_output, "no progress output seen; poll loop did not run"
+    assert b"not found" not in pty_output, f"unexpected external command: {pty_output!r}"

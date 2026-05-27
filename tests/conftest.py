@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import NamedTuple
 
@@ -89,6 +90,19 @@ class _TestHandler(BaseHTTPRequestHandler):
             self._send(200, b"")
         elif route == "/large":
             self._send(200, b"x" * (1024 * 1024))
+        elif route == "/slow-large":
+            # Send body after a deliberate pause so the client's progress poll
+            # loop fires at least once before cat exits.  350ms > one 250ms poll
+            # interval, so the loop runs whether or not _poll_sleep actually sleeps.
+            body = b"x" * (64 * 1024)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                time.sleep(0.35)
+                self.wfile.write(body)
+                self.wfile.flush()
         elif route == "/echo-method":
             self._send(200, self.command.encode())
         elif route == "/echo-path":
