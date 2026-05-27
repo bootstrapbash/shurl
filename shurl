@@ -582,7 +582,7 @@ if [[ -n "${_IS_ZSH}" ]]; then
   "zmod""load" "zsh/zselect" 2>/dev/null
   _poll_sleep() { zselect -t 25 2>/dev/null || true; }
 else
-  _poll_sleep() { read -t 0.25 _ < /dev/tty 2>/dev/null || true; }
+  _poll_sleep() { read -r -t 0.25 _ < /dev/tty 2>/dev/null || true; }
 fi
 
 transfer_body() {

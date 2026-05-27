@@ -14,6 +14,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -182,9 +183,26 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+class _QuietHTTPServer(HTTPServer):
+    """HTTPServer that silently drops broken-pipe / reset errors.
+
+    These are normal when a client closes the connection before the server
+    finishes writing (e.g. shurl exits on an auth error before reading the
+    body).  Python's default handle_error prints a traceback to stderr which
+    pollutes test output even though the test itself passes.
+    """
+
+    _IGNORED_ERRORS = (BrokenPipeError, ConnectionResetError)
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], self._IGNORED_ERRORS):
+            return
+        super().handle_error(request, client_address)
+
+
 def _start_server(handler_cls, ssl_context=None) -> tuple[HTTPServer, ServerInfo]:
     port = _free_port()
-    httpd = HTTPServer(("127.0.0.1", port), handler_cls)
+    httpd = _QuietHTTPServer(("127.0.0.1", port), handler_cls)
     if ssl_context:
         httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
     scheme = "https" if ssl_context else "http"
