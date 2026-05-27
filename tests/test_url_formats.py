@@ -1,7 +1,13 @@
 """Tests for URL format handling: IPv4, non-default port, IPv6, hostname."""
+import platform
 import socket
 
 import pytest
+
+_skip_ipv6_macos = pytest.mark.skipif(
+    platform.system() == "Darwin",
+    reason="zsh ztcp does not support IPv6",
+)
 
 
 def test_ipv4_address(run, http_server):
@@ -27,6 +33,7 @@ def test_non_default_port_in_host_header(run, http_server):
     assert f"> Host: 127.0.0.1:{http_server.port}" in r.stderr
 
 
+@_skip_ipv6_macos
 def test_ipv6_address(run, http_server_ipv6):
     """IPv6 address in bracket notation connects and returns a response."""
     r = run(f"{http_server_ipv6.url}/get")
@@ -34,6 +41,7 @@ def test_ipv6_address(run, http_server_ipv6):
     assert r.stdout == "hello world\n"
 
 
+@_skip_ipv6_macos
 def test_ipv6_host_header(run, http_server_ipv6):
     """IPv6 Host header retains the bracket notation per RFC 2732."""
     r = run("-v", f"{http_server_ipv6.url}/get")
