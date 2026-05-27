@@ -24,12 +24,69 @@ import threading
 import pytest
 
 
+def _bash_version(path: str) -> tuple[int, int] | None:
+    try:
+        result = subprocess.run(
+            [path, "-c", 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        major_str, minor_str = result.stdout.strip().split(".")[:2]
+        return int(major_str), int(minor_str)
+    except (ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def _bash_meets_minimum(path: str) -> bool:
+    version = _bash_version(path)
+    if version is None:
+        return False
+    major, minor = version
+    return major > 4 or (major == 4 and minor >= 1)
+
+
+def _bootstrap_shells_on_path() -> dict[str, str]:
+    """Shell binaries shurl needs on PATH to pass its bootstrap (not runtime deps).
+
+    Tests launch via ``bash shurl`` with a restricted PATH.  On macOS /bin/bash is
+    3.2, so shurl re-execs zsh; zsh must be present on that PATH too.
+    """
+    shells: dict[str, str] = {}
+    bash_path = shutil.which("bash")
+    if bash_path is None:
+        pytest.fail("bash not found on host PATH")
+
+    for candidate in ("bash-5", "bash5", "bash-4", "bash4", "bash"):
+        alt_path = shutil.which(candidate)
+        if alt_path and _bash_meets_minimum(alt_path):
+            shells["bash"] = alt_path
+            return shells
+
+    shells["bash"] = bash_path
+    if _bash_meets_minimum(bash_path):
+        return shells
+
+    zsh_path = shutil.which("zsh")
+    if zsh_path:
+        shells["zsh"] = zsh_path
+        return shells
+
+    pytest.fail("need bash 4.1+ or zsh on host for shurl bootstrap")
+
+
 def _restricted_env(tmp_path, *allowed_names: str) -> dict:
     """Return an env dict with PATH pointing to a dir containing only the
     named binaries (symlinked from their real locations)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    for name, real_path in _bootstrap_shells_on_path().items():
+        (bin_dir / name).symlink_to(real_path)
     for name in allowed_names:
+        if name in ("bash", "zsh"):
+            continue
         real = shutil.which(name)
         assert real is not None, f"{name} not found on host PATH"
         (bin_dir / name).symlink_to(real)
