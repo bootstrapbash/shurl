@@ -344,9 +344,12 @@ _progress_update() {
     printf '\r[%s]%s' "${bar_str}" "${suffix}" >&2
   else
     # Stats mode: curl-style table
+    progress_header_fmt='%3s %5s  %3s %5s  %7s  %8s %8s %8s %6s'
     if [[ -z "${_progress_header_shown}" ]]; then
-      printf '  %% Total    %% Received  Average Speed   Time    Time     Time  Current\n' >&2
-      printf '                          Dload          Total   Spent    Left  Speed\n' >&2
+      printf "${progress_header_fmt}"'\n' \
+        '%' 'Total' '%' 'Recvd' 'Average' 'Time' 'Time' 'Time' 'Current' >&2
+      printf "${progress_header_fmt}"'\n' \
+        '' '' '' '' 'Dload' 'Total' 'Spent' 'Left' 'Speed' >&2
       _progress_header_shown=1
     fi
     # Current speed: update baseline each time a new second has elapsed.
@@ -357,28 +360,29 @@ _progress_update() {
       _cur_speed_elapsed="${elapsed}"
     fi
     local time_total=-1 time_left=-1
-    local time_spent=-1
-    if [[ "${received}" -gt 0 ]]; then
-      time_spent="${elapsed}"
-    fi
     if [[ "${total}" -gt 0 ]]; then
       local pct=$(( received * 100 / total ))
       if [[ "${speed}" -gt 0 ]]; then
         time_total=$(( total / speed ))
-        time_left=$(( (total - received) / speed ))
+        if [[ "${received}" -lt "${total}" ]]; then
+          time_left=$(( (total - received) / speed ))
+        else
+          time_left=-1
+        fi
       fi
-      printf '\r%3d %5s  %3d %5s  %5s  %8s %8s %8s %5s' \
+      printf '\r'"${progress_header_fmt}" \
         "${pct}" "$(_human_size "${total}")" \
         "${pct}" "$(_human_size "${received}")" \
         "$(_human_speed "${speed}")" \
         "$(_format_time "${time_total}")" \
-        "$(_format_time "${time_spent}")" \
+        "$(_format_time "${elapsed}")" \
         "$(_format_time "${time_left}")" \
         "$(_human_speed "${_cur_speed}")" >&2
     else
-      printf '\r  0     0    0     0      0  %8s %8s %8s %5s' \
+      printf '\r'"${progress_header_fmt}" \
+        0 0 0 0 0 \
         "$(_format_time -1)" \
-        "$(_format_time "${time_spent}")" \
+        "$(_format_time "${elapsed}")" \
         "$(_format_time -1)" \
         "$(_human_speed "${_cur_speed}")" >&2
     fi
