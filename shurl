@@ -171,18 +171,12 @@ if [[ -n "${_IS_ZSH}" ]]; then
   _file_size() { zstat +size "$1" 2>/dev/null || echo 0; }
 else
   _file_size() {
-    local fdinfo_line
     {
-      while IFS= read -r fdinfo_line; do
-        case "${fdinfo_line}" in
-          pos:*)
-            fdinfo_line="${fdinfo_line#pos:}"
-            while [[ "${fdinfo_line}" == [[:space:]]* ]]; do
-              fdinfo_line="${fdinfo_line#?}"
-            done
-            echo "${fdinfo_line}"
-            return ;;
-        esac
+      while read -r field val; do
+        if [[ "${field}" == "pos:" ]]; then
+          echo "${val}"
+          return
+        fi
       done < "/proc/$1/fdinfo/1"
     } 2>/dev/null
     echo 0
@@ -301,6 +295,7 @@ _progress_start() {
   _progress_start_secs="${SECONDS}"
 }
 
+readonly PROGRESS_FMT='%3s %5s  %3s %5s  %7s  %8s %8s %8s %6s'
 _progress_update() {
   [[ -z "${_progress_mode}" ]] && return
   local received="$1" total="$2"
@@ -309,7 +304,6 @@ _progress_update() {
   local speed=$(( received / elapsed ))
 
   if [[ "${_progress_mode}" == "bar" ]]; then
-    local cols="${COLUMNS:-80}"
     local suffix
     if [[ "${total}" -gt 0 ]]; then
       local pct_x10=$(( received * 1000 / total ))
@@ -319,7 +313,7 @@ _progress_update() {
     else
       suffix=$(printf ' %s %s/s' "$(_human_size "${received}")" "$(_human_speed "${speed}")")
     fi
-    local bar_width=$(( cols - ${#suffix} - 3 ))
+    local bar_width=$(( ${COLUMNS:-80} - ${#suffix} - 3 ))
     [[ "${bar_width}" -lt 10 ]] && bar_width=10
     local filled=0
     if [[ "${total}" -gt 0 ]]; then
@@ -344,13 +338,12 @@ _progress_update() {
     printf '\r[%s]%s' "${bar_str}" "${suffix}" >&2
   else
     # Stats mode: curl-style table
-    readonly progress_fmt='%3s %5s  %3s %5s  %7s  %8s %8s %8s %6s'
     if [[ -z "${_progress_header_shown}" ]]; then
-      # shellcheck disable=SC2059  # progress_fmt is readonly
-      printf "${progress_fmt}"'\n' \
+      # shellcheck disable=SC2059  # PROGRESS_FMT is readonly
+      printf "${PROGRESS_FMT}"'\n' \
         '%' 'Total' '%' 'Recvd' 'Average' 'Time' 'Time' 'Time' 'Current' >&2
-      # shellcheck disable=SC2059  # progress_fmt is readonly
-      printf "${progress_fmt}"'\n' \
+      # shellcheck disable=SC2059  # PROGRESS_FMT is readonly
+      printf "${PROGRESS_FMT}"'\n' \
         '' '' '' '' 'Dload' 'Total' 'Spent' 'Left' 'Speed' >&2
       _progress_header_shown=1
     fi
@@ -372,8 +365,8 @@ _progress_update() {
           time_left=-1
         fi
       fi
-      # shellcheck disable=SC2059  # progress_fmt is readonly
-      printf '\r'"${progress_fmt}" \
+      # shellcheck disable=SC2059  # PROGRESS_FMT is readonly
+      printf '\r'"${PROGRESS_FMT}" \
         "${pct}" "$(_human_size "${total}")" \
         "${pct}" "$(_human_size "${received}")" \
         "$(_human_speed "${speed}")" \
@@ -382,8 +375,8 @@ _progress_update() {
         "$(_format_time "${time_left}")" \
         "$(_human_speed "${_cur_speed}")" >&2
     else
-      # shellcheck disable=SC2059  # progress_fmt is readonly
-      printf '\r'"${progress_fmt}" \
+      # shellcheck disable=SC2059  # PROGRESS_FMT is readonly
+      printf '\r'"${PROGRESS_FMT}" \
         0 0 0 0 0 \
         "$(_format_time -1)" \
         "$(_format_time "${elapsed}")" \
