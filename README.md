@@ -77,6 +77,13 @@ Body splicers (`--shurl-splicer`): `cat` (default when present), `openssl`,
 `bashcat` (requires `Content-Length`), or `bashcat-force` (read until EOF;
 text-only safe). When the flag is omitted, shurl autodetects in that order.
 
+The `bashcat` splicer is pathologically slow.  Every `nul`-delimited byte
+string is assigned to a bash variable in a plodding bash shell loop.
+Conversely, the default `cat` splicer has performance approaching that of
+`curl`. Once HTTP headers are exchanged, body transfer is simply `cat`
+forwarding from a `/dev/tcp` FD to the output file, with no other bash
+involvement.
+
 ### macOS
 
 macOS ships with bash 3.2 (too old) and zsh 5.x (fully supported). The
@@ -100,12 +107,11 @@ Runtime dependencies (`openssl`, `cat`, `zsh`) are pre-installed on macOS.
 
 ## Installation
 
-```bash
-curl -O https://raw.githubusercontent.com/.../shurl
-chmod +x shurl
-```
+Copy the single `shurl` file to wherever you need it.
 
-Or copy the single file to wherever you need it.
+```
+chmod a+x shurl
+```
 
 ## Usage
 
