@@ -646,7 +646,7 @@ fi
 # _splice_from_fd SRC_FD [DEST_FILE] [BACKGROUND=0]
 # Splices bytes from SRC_FD to DEST_FILE or stdout. When BACKGROUND=1, runs in &.
 _splice_from_fd() {
-  local src_fd="$1" dest="${2:-}" bg="${3:-0}" force=0
+  local src_fd="$1" dest="${2:-}" force=0
   [[ "${_SPLICER}" == bashcat-force ]] && force=1
 
   case "${_SPLICER}" in
@@ -656,17 +656,9 @@ _splice_from_fd() {
   esac
 
   if [[ -n "${dest}" ]]; then
-    if [[ "${bg}" -eq 1 ]]; then
-      "${_cmd[@]}" <&"${src_fd}" > "${dest}" &
-    else
-      "${_cmd[@]}" <&"${src_fd}" > "${dest}"
-    fi
+    "${_cmd[@]}" <&"${src_fd}" > "${dest}"
   else
-    if [[ "${bg}" -eq 1 ]]; then
-      "${_cmd[@]}" <&"${src_fd}" &
-    else
-      "${_cmd[@]}" <&"${src_fd}"
-    fi
+    "${_cmd[@]}" <&"${src_fd}"
   fi
 }
 
@@ -687,7 +679,7 @@ transfer_body() {
 
   local total="${resp_content_length:-0}"
 
-  _splice_from_fd "${conn_read_fd}" "${opt_output}" 1
+  _splice_from_fd "${conn_read_fd}" "${opt_output}" &
   local splicer_pid=$!
 
   local received=0
