@@ -1,6 +1,7 @@
 # shurl
 
-A minimal HTTP/HTTPS client implemented as a single bash script.
+A minimal, low-dependency/no-dependency HTTP/HTTPS client implemented as a
+single shell script.
 
 ## Introduction
 
@@ -15,36 +16,54 @@ systems, minimal containers, CI bootstrap stages, and so on. A single script
 is easy to copy with `scp`, embed in a heredoc, or paste into a terminal, and
 it runs on any host that has bash 4.1+ or zsh 5.x - including stock macOS.
 
+## Relationship to curl
+
+`shurl` is a **bootstrap client**, not a curl replacement. It exists for the
+moment when you have a shell and a network path, but no package manager, no
+compiler, and no pre-installed HTTP tool — and you need to fetch *something*
+to move forward.
+
+The canonical success case is exactly that:
+
+```bash
+./shurl -o curl.tar.gz https://curl.se/download/curl.tar.gz
+```
+
+If `shurl` gets you to curl (or any other tarball, script, or package index),
+it has done its job. Use curl for everything after that.
+
+Common curl one-liners translate directly (`-sL -o`, `-H`, `-u`, `-d`, `-I`,
+etc.; see [Options](#options)). Omitted by design: cert verification, proxies,
+multipart/cookie jar, HTTP/2, and binary request bodies via `-d`. Details in
+[Notes](#notes).
+
 ## Design principles
 
 1. **Shell built-ins first.** Network I/O goes through `/dev/tcp` (bash) or
-   `ztcp` (zsh), response parsing uses `read` and `[[ =~ ]]`, and header
+  `ztcp` (zsh), response parsing uses `read` and `[[ =~ ]]`, and header
    handling is pure shell string manipulation. External tools are used only
    where the shell fundamentally cannot do the job.
-
-2. **Minimal, deliberate exceptions.** Two external dependencies are
-   unavoidable:
-   - `openssl` - required for TLS (HTTPS) and for base64-encoding Basic auth
-     credentials. Bash has no native TLS support.
-   - `cat` - required for binary-safe body transfer. Bash's `read` silently
-     drops null bytes (`\0`), making it unsuitable for arbitrary binary data.
-
+2. **Minimal, deliberate exceptions.** External tools are used only where the
+  shell cannot do the job:
+  - `openssl` - required for TLS (HTTPS) and for base64-encoding Basic auth
+  credentials. Bash has no native TLS support.
+  - Body transfer uses a pluggable FD splicer (`--shurl-splicer`). By default
+  shurl autodetects `cat`, then `openssl enc -none`, then a built-in
+  `bashcat` pure-bash reader. Plain HTTP can therefore be downloaded with
+  zero external dependencies when `bashcat` is selected or autodetected.
 3. **Single file, readable source.** The entire implementation lives in
-   `shurl`. No build step, no compiled components, no install. Copy the
+  `shurl`. No build step, no compiled components, no install. Copy the
    file and run it. The source is kept small but not minified; clarity is
    preferred over brevity when the two conflict.
-
 4. **curl-compatible CLI.** Flags follow curl conventions so that usage is
-   familiar and the tool can act as a drop-in replacement for common curl
+  familiar and the tool can act as a drop-in replacement for common curl
    one-liners.
-
 5. **HTTP/1.0 requests.** Using HTTP/1.0 avoids chunked transfer encoding and
-   most of the complexity that comes with HTTP/1.1 persistent connections.
+  most of the complexity that comes with HTTP/1.1 persistent connections.
    Servers respond with a single body and close the connection, keeping the
    response-parsing logic simple.
-
 6. **Correct over clever.** HTTP edge cases (Content-Length in bytes not
-   characters, 301/302/303 dropping the request body, HEAD never sending a
+  characters, 301/302/303 dropping the request body, HEAD never sending a
    body) are handled correctly even where a naive implementation would not
    notice the difference.
 
@@ -52,7 +71,11 @@ it runs on any host that has bash 4.1+ or zsh 5.x - including stock macOS.
 
 - **bash 4.1+** *or* **zsh 5.x** - the script works with either shell
 - `openssl` - for HTTPS and `-u` basic auth (optional for plain HTTP)
-- `cat` - for binary body output (present on virtually every Unix system)
+- `cat` - preferred body splicer (optional; see `--shurl-splicer`)
+
+Body splicers (`--shurl-splicer`): `cat` (default when present), `openssl`,
+`bashcat` (requires `Content-Length`), or `bashcat-force` (read until EOF;
+text-only safe). When the flag is omitted, shurl autodetects in that order.
 
 ### macOS
 
@@ -92,23 +115,25 @@ shurl [OPTIONS] URL
 
 ### Options
 
-| Flag | Description |
-|------|-------------|
-| `-v` | Verbose: print request and response headers to stderr |
-| `-s` | Silent: suppress all stderr output |
-| `-o <file>` | Write response body to `<file>` instead of stdout |
-| `-I` | HEAD request: print response headers, no body |
-| `-L` | Follow redirects (3xx responses) |
-| `-H "Name: Val"` | Add a request header (repeatable) |
-| `-u user:pass` | HTTP Basic authentication |
-| `-X METHOD` | HTTP method (default: GET, or POST when `-d` is given) |
-| `-d <data>` | Request body; implies POST unless `-X` overrides |
-| `-D <file>` | Dump response headers to `<file>` |
-| `-A <agent>` | Custom User-Agent string |
-| `-e <url>` | Referer URL |
-| `--max-redirs N` | Maximum redirects to follow (default: 10) |
-| `--connect-timeout N` | Seconds to wait for the first response byte |
-| `--help` | Print help and exit |
+
+| Flag                  | Description                                            |
+| --------------------- | ------------------------------------------------------ |
+| `-v`                  | Verbose: print request and response headers to stderr  |
+| `-s`                  | Silent: suppress all stderr output                     |
+| `-o <file>`           | Write response body to `<file>` instead of stdout      |
+| `-I`                  | HEAD request: print response headers, no body          |
+| `-L`                  | Follow redirects (3xx responses)                       |
+| `-H "Name: Val"`      | Add a request header (repeatable)                      |
+| `-u user:pass`        | HTTP Basic authentication                              |
+| `-X METHOD`           | HTTP method (default: GET, or POST when `-d` is given) |
+| `-d <data>`           | Request body; implies POST unless `-X` overrides       |
+| `-D <file>`           | Dump response headers to `<file>`                      |
+| `-A <agent>`          | Custom User-Agent string                               |
+| `-e <url>`            | Referer URL                                            |
+| `--max-redirs N`      | Maximum redirects to follow (default: 10)              |
+| `--connect-timeout N` | Seconds to wait for the first response byte            |
+| `--help`              | Print help and exit                                    |
+
 
 ## Examples
 
@@ -206,19 +231,18 @@ Use standard bracket notation:
 
 ## Notes
 
+These expand on the [Relationship to curl](#relationship-to-curl) section above.
+
 - **HTTP/1.0 only.** Servers that require HTTP/1.1 features (chunked encoding,
-  virtual hosting without a Host header) may not work correctly. In practice
-  this is rare; virtually all servers accept HTTP/1.0 requests.
-
+virtual hosting without a Host header) may not work correctly. In practice
+this is rare; virtually all servers accept HTTP/1.0 requests.
 - **No certificate verification.** The `openssl s_client` invocation does not
-  verify the server certificate. This is intentional for a minimal tool; use
-  curl if you need strict TLS certificate checking.
-
+verify the server certificate. This is intentional for a minimal tool; use
+curl if you need strict TLS certificate checking.
 - **Body data is passed as a shell argument.** Binary data with null bytes
-  cannot be passed via `-d`; use curl for that case.
-
+cannot be passed via `-d`; use curl for that case.
 - **Redirect body semantics match curl.** 301, 302, and 303 redirects drop the
-  request body and switch to GET. 307 and 308 preserve the method and body.
+request body and switch to GET. 307 and 308 preserve the method and body.
 
 ## Development
 

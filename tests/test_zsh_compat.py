@@ -230,3 +230,19 @@ def test_zsh_output_to_file(zsh_run, http_server, tmp_path):
     r = zsh_run("-o", str(out), f"{http_server.url}/get")
     assert r.returncode == 0
     assert out.read_text() == "hello world\n"
+
+
+# ---------------------------------------------------------------------------
+# bashcat (byte-accurate ${#line} requires LC_CTYPE=C in zsh too)
+# ---------------------------------------------------------------------------
+
+def test_zsh_bashcat_multibyte_body(zsh_run, http_server, tmp_path):
+    body = "café".encode()  # 4 chars, 5 UTF-8 bytes
+    out = tmp_path / "body.bin"
+    r = zsh_run(
+        "--shurl-splicer", "bashcat",
+        "-o", str(out),
+        f"{http_server.url}/multibyte-body",
+    )
+    assert r.returncode == 0
+    assert out.read_bytes() == body

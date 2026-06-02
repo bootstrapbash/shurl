@@ -114,6 +114,22 @@ class _TestHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length) if length else b""
             self._send(200, body)
+        elif route == "/binary-nulls":
+            self._send(
+                200,
+                b"before\x00after",
+                content_type="application/octet-stream",
+            )
+        elif route == "/multibyte-body":
+            # UTF-8: 4 characters, 5 bytes (é is two bytes).
+            self._send(200, "café".encode())
+        elif route == "/no-content-length":
+            body = b"hello without cl\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
         elif route == "/notfound":
             self._send(404, b"Not Found")
         elif route == "/unauthorized":

@@ -170,6 +170,18 @@ def test_plain_http_post_works_with_only_cat(shurl_script, http_server, tmp_path
     assert r.stdout == "x=1"
 
 
+def test_plain_http_works_with_bashcat_only(shurl_script, http_server, tmp_path):
+    """Plain HTTP with no external binaries except bootstrap shell."""
+    env = _restricted_env(tmp_path, "bash")
+    r = _run(
+        shurl_script, env,
+        "--shurl-splicer", "bashcat",
+        f"{http_server.url}/get",
+    )
+    assert r.returncode == 0
+    assert "hello world" in r.stdout
+
+
 # ---------------------------------------------------------------------------
 # HTTPS: requires openssl (and cat for body)
 # ---------------------------------------------------------------------------

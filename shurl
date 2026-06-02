@@ -4,7 +4,7 @@
 # Requires bash 4.1+ (prefered) or zsh 5.x (macos).
 # External deps (intentional exceptions to the shell-only rule):
 #   openssl - TLS (HTTPS) and base64 for -u auth
-#   cat     - binary-safe body transfer (shell read drops null bytes)
+#   cat     - preferred binary-safe body transfer (see --shurl-splicer)
 
 # -- Bootstrap: ensure we're running in bash 4.1+ or zsh 5.x --
 if [[ -z "${_HTTP_SHELL_SELECTED}" ]]; then
@@ -69,11 +69,13 @@ usage() {
     '  -e <url>        Referer URL' \
     '  --max-redirs N  Max redirects to follow (default: 10)' \
     '  --connect-timeout N  Seconds to wait for first response byte' \
+    '  --shurl-splicer MODE  Body FD splicer: cat, openssl, bashcat,' \
+    '                        or bashcat-force (default: autodetect)' \
     '  --help          Show this help and exit' \
     '' \
     'External dependencies:' \
     '  openssl  HTTPS and -u basic auth' \
-    '  cat      binary-safe body output' \
+    '  cat      preferred body splicer (optional; see --shurl-splicer)' \
     >&2
 }
 
@@ -215,6 +217,13 @@ while [[ $# -gt 0 ]]; do
     --connect-timeout)
         [[ $# -lt 2 ]] && die "--connect-timeout requires an argument"
         opt_connect_timeout="$2"; shift 2 ;;
+    --shurl-splicer)
+        [[ $# -lt 2 ]] && die "--shurl-splicer requires an argument"
+        case "$2" in
+          cat|openssl|bashcat|bashcat-force) opt_splicer="$2" ;;
+          *) die "Unknown splicer: $2 (use cat, openssl, bashcat, or bashcat-force)" ;;
+        esac
+        shift 2 ;;
     --help|-h) usage; exit 0 ;;
     --) shift; break ;;
     -*) die "Unknown option: $1" ;;
@@ -574,44 +583,124 @@ read_response_headers() {
   [[ -n "${dump_fd}" ]] && _close_write_fd
 }
 
-# -- Body transfer with optional progress --
-# _poll_sleep - builtin-only ~0.25s pause between progress polls.
-# zsh: zselect from zsh/zselect module (centisecond timer).
-# bash: read with timeout from /dev/tty (progress requires a TTY anyway).
+# -- Body FD splicers (shell read drops null bytes) --
+
+# Returns 0 if splicer NAME is usable (bashcat variants always are).
+_splicer_available() {
+  case "$1" in
+    cat) command -v cat &>/dev/null ;;
+    openssl) command -v openssl &>/dev/null && printf '' | openssl enc -none &>/dev/null ;;
+    bashcat|bashcat-force) ;;
+  esac
+}
+
+_resolve_splicer() {
+  local c
+  if [[ -n "${opt_splicer}" ]]; then
+    _splicer_available "${opt_splicer}" || die "splicer ${opt_splicer} is not available"
+    _SPLICER="${opt_splicer}"
+  else
+    for c in cat openssl bashcat; do
+      if _splicer_available "${c}"; then _SPLICER="${c}"; break; fi
+    done
+  fi
+  vlog "Using splicer: ${_SPLICER}"
+}
+
+# _bashcat CONTENT_LENGTH [FORCE] - read binary from stdin, write to stdout.
+# Restores NUL bytes stripped by read -d when CONTENT_LENGTH is known.
+# FORCE=1 (bashcat-force): read until EOF without Content-Length (no NUL restore).
 if [[ -n "${_IS_ZSH}" ]]; then
-  "zmod""load" "zsh/zselect" 2>/dev/null
-  _poll_sleep() { zselect -t 25 2>/dev/null || true; }
+  _bashcat() {
+    local content_length="$1" force="${2:-0}" byte_count=0 line
+    [[ -z "${content_length}" && "${force}" -eq 0 ]] \
+      && die "bashcat requires Content-Length (use --shurl-splicer bashcat-force to override)"
+    LC_CTYPE=C
+    while IFS= read -r -d $'\0' line || [[ -n "${line}" ]]; do
+      print -nr -- "${line}"
+      (( byte_count += ${#line} ))
+      if [[ -n "${content_length}" ]] && (( byte_count < content_length )); then
+        print -nr -- $'\0'
+        (( byte_count++ ))
+      fi
+    done
+  }
 else
-  _poll_sleep() { read -r -t 0.25 _ < /dev/tty 2>/dev/null || true; }
+  _bashcat() {
+    local content_length="$1" force="${2:-0}" byte_count=0
+    [[ -z "${content_length}" && "${force}" -eq 0 ]] \
+      && die "bashcat requires Content-Length (use --shurl-splicer bashcat-force to override)"
+    LC_CTYPE=C
+    local line
+    while IFS= read -r -d '' line || [[ -n "${line}" ]]; do
+      printf '%s' "${line}"
+      ((byte_count+=${#line}))
+      if [[ -n "${content_length}" ]] && ((byte_count < content_length)); then
+        printf '\0'
+        ((byte_count++))
+      fi
+    done
+  }
 fi
+
+# _splice_from_fd SRC_FD [DEST_FILE] [BACKGROUND=0]
+# Splices bytes from SRC_FD to DEST_FILE or stdout. When BACKGROUND=1, runs in &.
+_splice_from_fd() {
+  local src_fd="$1" dest="${2:-}" bg="${3:-0}" force=0
+  [[ "${_SPLICER}" == bashcat-force ]] && force=1
+
+  case "${_SPLICER}" in
+    cat)                   local -a _cmd=(cat) ;;
+    openssl)               local -a _cmd=(openssl enc -none) ;;
+    bashcat|bashcat-force) local -a _cmd=(_bashcat "${resp_content_length}" "${force}") ;;
+  esac
+
+  if [[ -n "${dest}" ]]; then
+    if [[ "${bg}" -eq 1 ]]; then
+      "${_cmd[@]}" <&"${src_fd}" > "${dest}" &
+    else
+      "${_cmd[@]}" <&"${src_fd}" > "${dest}"
+    fi
+  else
+    if [[ "${bg}" -eq 1 ]]; then
+      "${_cmd[@]}" <&"${src_fd}" &
+    else
+      "${_cmd[@]}" <&"${src_fd}"
+    fi
+  fi
+}
+
+# -- Body transfer with optional progress --
+# read with timeout from /dev/tty (progress requires a TTY anyway).
+_tty_sleep() { read -r -t 0.1 _ < /dev/tty 2>/dev/null || true; }
 
 transfer_body() {
   if [[ -z "${_progress_mode}" ]]; then
     if [[ -n "${opt_output}" ]]; then
-      cat <&"${conn_read_fd}" > "${opt_output}" \
+      _splice_from_fd "${conn_read_fd}" "${opt_output}" \
         || die "Failed to write body to ${opt_output}"
     else
-      cat <&"${conn_read_fd}"
+      _splice_from_fd "${conn_read_fd}" || die "Failed to write body"
     fi
     return
   fi
 
   local total="${resp_content_length:-0}"
 
-  cat <&"${conn_read_fd}" > "${opt_output}" &
-  local cat_pid=$!
+  _splice_from_fd "${conn_read_fd}" "${opt_output}" 1
+  local splicer_pid=$!
 
   local received=0
-  while kill -0 "${cat_pid}" 2>/dev/null; do
+  while kill -0 "${splicer_pid}" 2>/dev/null; do
     if [[ -n "${_IS_ZSH}" ]]; then
       received=$(_file_size "${opt_output}")
     else
-      received=$(_file_size "${cat_pid}")
+      received=$(_file_size "${splicer_pid}")
     fi
     _progress_update "${received}" "${total}"
-    _poll_sleep
+    _tty_sleep
   done
-  wait "${cat_pid}" || die "Failed to write body to ${opt_output}"
+  wait "${splicer_pid}" || die "Failed to write body to ${opt_output}"
 
   [[ "${total}" -gt 0 ]] && received="${total}"
   _progress_finish "${received}" "${total}"
@@ -619,6 +708,7 @@ transfer_body() {
 
 # -- Main loop --
 parse_url "${url}"
+_resolve_splicer
 redirs_left="${opt_max_redirs}"
 [[ -n "${_progress_mode}" ]] && _progress_start
 
