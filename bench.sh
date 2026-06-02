@@ -62,9 +62,9 @@ done
 time_ms() {
     local n=$1; shift
     local t0 t1
-    t0=$(date +%s%3N)
+    t0=$(date '+(%s*1000)+(%N/1000000)'|bc)
     for _ in $(seq "$n"); do "$@" >/dev/null 2>&1; done
-    t1=$(date +%s%3N)
+    t1=$(date '+(%s*1000)+(%N/1000000)'|bc)
     echo $((t1 - t0))
 }
 
@@ -73,9 +73,9 @@ row() {
     local label=$1 s=$2 c=$3
     printf "  %-22s  %8.1f ms  %8.1f ms  %5.1fx\n" \
         "$label" \
-        "$(awk "BEGIN{printf \"%.1f\", $s / $N}")" \
-        "$(awk "BEGIN{printf \"%.1f\", $c / $N}")" \
-        "$(awk "BEGIN{printf \"%.1f\", $s / $c}")"
+        "$(bc -l <<< "$s / $N")" \
+        "$(bc -l <<< "$c / $N")" \
+        "$(bc -l <<< "$s / $c")"
 }
 
 echo ""
