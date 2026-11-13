@@ -57,16 +57,22 @@ def test_zsh_get_empty_body(zsh_run, http_server):
 # HTTP errors
 # ---------------------------------------------------------------------------
 
-def test_zsh_404_fails(zsh_run, http_server):
+def test_zsh_404_exits_zero_with_body(zsh_run, http_server):
     r = zsh_run(f"{http_server.url}/notfound")
-    assert r.returncode != 0
-    assert "404" in r.stderr
+    assert r.returncode == 0
+    assert r.stdout == "Not Found"
 
 
-def test_zsh_500_fails(zsh_run, http_server):
+def test_zsh_500_exits_zero_with_body(zsh_run, http_server):
     r = zsh_run(f"{http_server.url}/servererror")
-    assert r.returncode != 0
-    assert "500" in r.stderr
+    assert r.returncode == 0
+    assert r.stdout == "Internal Server Error"
+
+
+def test_zsh_fail_exits_22(zsh_run, http_server):
+    r = zsh_run("-f", f"{http_server.url}/notfound")
+    assert r.returncode == 22
+    assert r.stdout == ""
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +147,8 @@ def test_zsh_basic_auth_header_sent(zsh_run, http_server):
 
 def test_zsh_redirect_not_followed_by_default(zsh_run, http_server):
     r = zsh_run(f"{http_server.url}/redirect301")
-    assert r.returncode != 0
-    assert "301" in r.stderr
+    assert r.returncode == 0
+    assert "301" not in r.stderr
 
 
 def test_zsh_follow_redirect_301(zsh_run, http_server):
@@ -215,10 +221,22 @@ def test_zsh_verbose_shows_request_headers(zsh_run, http_server):
     assert "< HTTP/1.0 200" in r.stderr
 
 
-def test_zsh_silent_suppresses_stderr(zsh_run, http_server):
+def test_zsh_silent_no_stderr_on_404(zsh_run, http_server):
     r = zsh_run("-s", f"{http_server.url}/notfound")
-    assert r.returncode != 0
+    assert r.returncode == 0
     assert r.stderr == ""
+
+
+def test_zsh_silent_fail_hides_message(zsh_run, http_server):
+    r = zsh_run("-s", "-f", f"{http_server.url}/notfound")
+    assert r.returncode == 22
+    assert r.stderr == ""
+
+
+def test_zsh_silent_shows_parse_error(zsh_run, http_server):
+    r = zsh_run("-s", "-w", f"{http_server.url}/get")
+    assert r.returncode != 0
+    assert "Unknown option" in r.stderr
 
 
 # ---------------------------------------------------------------------------

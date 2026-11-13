@@ -41,8 +41,18 @@ set -o pipefail
 
 opt_max_redirs=10
 opt_headers=()
+opt_urlencode_parts=()
 
-die()  { [[ -z "${opt_silent}" ]] && printf 'shurl: %s\n' "$*" >&2; exit 1; }
+die() { printf 'shurl: %s\n' "$*" >&2; exit 1; }
+
+fail() {
+  local code="$1"
+  shift
+  [[ -z "${opt_silent}" || -n "${opt_show_error}" ]] \
+    && printf 'shurl: %s\n' "$*" >&2
+  exit "${code}"
+}
+
 log()  { [[ -z "${opt_silent}" ]] && printf '%s\n' "$*" >&2; return 0; }
 vlog() { [[ -n "${opt_verbose}" && -z "${opt_silent}" ]] && printf '%s\n' "$*" >&2; return 0; }
 
@@ -59,11 +69,16 @@ usage() {
     '  -I              HEAD request: show response headers, no body' \
     '  -L              Follow redirects' \
     '  -H "Name: Val"  Add request header (repeatable)' \
-    '  -s              Silent: suppress progress meter and all stderr output' \
+    '  -s              Silent: suppress progress meter and transfer errors' \
+    '  -S, --show-error  Show transfer errors when used with -s' \
+    '  -f, --fail      Fail (exit 22) on HTTP >= 400; suppress error body' \
+    '  -G, --get       Put -d/--data-urlencode data in URL query string' \
     '  -#, --progress-bar  Display a progress bar instead of stats' \
     '  -u user:pass    HTTP Basic auth' \
     '  -X METHOD       HTTP method (default: GET, or POST when -d is given)' \
-    '  -d <data>       Request body (implies POST unless -X overrides)' \
+    '  -d, --data <data>  Request body (implies POST unless -X/-G overrides)' \
+    '  --data-urlencode <data>  URL-encoded query parameter (use with -G)' \
+    '  --data-binary <data>  Request body; @file reads from file' \
     '  -D <file>       Dump response headers to <file>' \
     '  -A <agent>      Custom User-Agent' \
     '  -e <url>        Referer URL' \
@@ -185,66 +200,145 @@ else
   }
 fi
 
-# -- Argument parsing --
-while [[ $# -gt 0 ]]; do
+# -- Expand combined short flags (-sI, -sS, etc.) --
+_expand_argv() {
+  _expanded_argv=()
+  local arg i c
+  for arg in "$@"; do
+    if [[ "${arg}" == -* && "${arg}" != --* && ${#arg} -gt 2 ]]; then
+      case "${arg:1:1}" in
+        [HouXdDeA])
+          _expanded_argv+=("${arg}")
+          ;;
+        *)
+          for (( i=1; i<${#arg}; i++ )); do
+            c="${arg:$i:1}"
+            [[ "${c}" == "#" ]] && _expanded_argv+=('-#') || _expanded_argv+=("-${c}")
+          done
+          ;;
+      esac
+    else
+      _expanded_argv+=("${arg}")
+    fi
+  done
+}
+
+# -- Read a request body from -d/--data/--data-binary argument --
+_read_data_arg() {
+  local val="$1"
+  if [[ "${val}" == @* ]]; then
+    local fpath="${val#@}"
+    [[ -r "${fpath}" ]] || die "Failed to read ${fpath}"
+    # Sentinel so command substitution keeps a trailing newline. Uses cat
+    # (already an allowed exception) rather than wc/stat for the byte count.
+    opt_data=$(cat "${fpath}"; printf x) || die "Failed to read ${fpath}"
+    opt_data="${opt_data%x}"
+  else
+    opt_data="${val}"
+  fi
+}
+
+# -- Parse one option from positional params; must be called in caller scope --
+_parse_one_opt() {
   case "$1" in
-    -v) opt_verbose=1;  shift ;;
-    -I) opt_head=1;     shift ;;
-    -s) opt_silent=1;   shift ;;
-    -\#|--progress-bar) opt_progress_bar=1; shift ;;
-    -L) opt_follow=1;   shift ;;
+    -v) opt_verbose=1;  return 0 ;;
+    -I) opt_head=1;     return 0 ;;
+    -s) opt_silent=1;   return 0 ;;
+    -S|--show-error) opt_show_error=1; return 0 ;;
+    -f|--fail) opt_fail=1; return 0 ;;
+    -G|--get) opt_get=1; return 0 ;;
+    -\#|--progress-bar) opt_progress_bar=1; return 0 ;;
+    -L) opt_follow=1;   return 0 ;;
     -o) [[ $# -lt 2 ]] && die "-o requires an argument"
-        opt_output="$2";        shift 2 ;;
+        opt_output="$2";        return 0 ;;
     -H) [[ $# -lt 2 ]] && die "-H requires an argument"
-        opt_headers+=("$2");    shift 2 ;;
+        opt_headers+=("$2");    return 0 ;;
     -u) [[ $# -lt 2 ]] && die "-u requires an argument"
         [[ "$2" == *:* ]] || die "-u requires user:pass format"
-        opt_auth="$2";          shift 2 ;;
+        opt_auth="$2";          return 0 ;;
     -X) [[ $# -lt 2 ]] && die "-X requires an argument"
-        opt_method="$2";        shift 2 ;;
-    -d) [[ $# -lt 2 ]] && die "-d requires an argument"
-        opt_data="$2";          shift 2 ;;
+        opt_method="$2";        return 0 ;;
+    -d|--data)
+        [[ $# -lt 2 ]] && die "$1 requires an argument"
+        _read_data_arg "$2";    return 0 ;;
+    --data-urlencode)
+        [[ $# -lt 2 ]] && die "--data-urlencode requires an argument"
+        opt_urlencode_parts+=("$2"); return 0 ;;
+    --data-binary)
+        [[ $# -lt 2 ]] && die "--data-binary requires an argument"
+        _read_data_arg "$2";    return 0 ;;
     -D) [[ $# -lt 2 ]] && die "-D requires an argument"
-        opt_dump_headers="$2";  shift 2 ;;
+        opt_dump_headers="$2";  return 0 ;;
     -A) [[ $# -lt 2 ]] && die "-A requires an argument"
-        opt_agent="$2";         shift 2 ;;
+        opt_agent="$2";         return 0 ;;
     -e) [[ $# -lt 2 ]] && die "-e requires an argument"
-        opt_referer="$2";       shift 2 ;;
+        opt_referer="$2";       return 0 ;;
     --max-redirs)
         [[ $# -lt 2 ]] && die "--max-redirs requires an argument"
         [[ "$2" =~ ^[0-9]+$ ]] || die "--max-redirs requires a non-negative integer"
-        opt_max_redirs="$2";    shift 2 ;;
+        opt_max_redirs="$2";    return 0 ;;
     --connect-timeout)
         [[ $# -lt 2 ]] && die "--connect-timeout requires an argument"
-        opt_connect_timeout="$2"; shift 2 ;;
+        opt_connect_timeout="$2"; return 0 ;;
     --shurl-splicer)
         [[ $# -lt 2 ]] && die "--shurl-splicer requires an argument"
         case "$2" in
           cat|openssl|bashcat|bashcat-force) opt_splicer="$2" ;;
           *) die "Unknown splicer: $2 (use cat, openssl, bashcat, or bashcat-force)" ;;
         esac
-        shift 2 ;;
+        return 0 ;;
     --help|-h) usage; exit 0 ;;
-    --) shift; break ;;
+    --) return 2 ;;
     -*) die "Unknown option: $1" ;;
-    *)  break ;;
+    *) return 1 ;;
+  esac
+}
+
+# -- Argument parsing --
+_expand_argv "$@"
+set -- "${_expanded_argv[@]}"
+url=''
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    http://*|https://*)
+      [[ -n "${url}" ]] && die "only one URL allowed"
+      url="$1"
+      shift
+      ;;
+    ftp://*|file://*)
+      [[ -n "${url}" ]] && die "only one URL allowed"
+      url="$1"
+      shift
+      ;;
+    -*)
+      _parse_one_opt "$@" || die "unexpected argument: $1"
+      _rc=$?
+      if [[ "${_rc}" -eq 2 ]]; then
+        shift
+        break
+      fi
+      case "$1" in
+        -o|-H|-u|-X|-d|--data|--data-urlencode|--data-binary|-D|-A|-e|--max-redirs|--connect-timeout|--shurl-splicer)
+          shift 2 ;;
+        *) shift ;;
+      esac
+      ;;
+    *)
+      [[ -n "${url}" ]] && die "only one URL allowed"
+      url="$1"
+      shift
+      ;;
   esac
 done
 
-[[ $# -lt 1 ]] && { usage; exit 1; }
-url="$1"
-shift
-if [[ $# -gt 0 ]]; then
-  case "$1" in
-    -*) die "option after URL: $1" ;;
-    *)  die "unexpected argument after URL: $1" ;;
-  esac
-fi
+[[ -z "${url}" ]] && { usage; exit 1; }
 
 if [[ -n "${opt_head}" ]]; then
   method="HEAD"
 elif [[ -n "${opt_method}" ]]; then
   method="${opt_method}"
+elif [[ -n "${opt_get}" || ${#opt_urlencode_parts[@]} -gt 0 ]]; then
+  method="GET"
 elif [[ -n "${opt_data}" ]]; then
   method="POST"
 else
@@ -402,6 +496,66 @@ _progress_finish() {
   printf '\n' >&2
 }
 
+# _urlencode_component STR - curl-style application/x-www-form-urlencoded encoding.
+_urlencode_component() {
+  local str="$1" i c hex
+  LC_ALL=C
+  for (( i=0; i<${#str}; i++ )); do
+    c="${str:$i:1}"
+    case "${c}" in
+      [A-Za-z0-9.~_-]) printf '%s' "${c}" ;;
+      ' ') printf '+' ;;
+      *)
+        printf -v hex '%02X' "'${c}"
+        printf '%%%s' "${hex}"
+        ;;
+    esac
+  done
+}
+
+# _urlencode_pair STR - encode a name=value or bare name for --data-urlencode.
+_urlencode_pair() {
+  local part="$1" name value
+  if [[ "${part}" == *'='* ]]; then
+    name="${part%%=*}"
+    value="${part#*=}"
+    _urlencode_component "${name}"
+    printf '='
+    _urlencode_component "${value}"
+  else
+    _urlencode_component "${part}"
+  fi
+}
+
+# _apply_query_string - append -G/-d/--data-urlencode data to url_path.
+_apply_query_string() {
+  local parts=() part sep='?' encoded
+  if [[ -n "${opt_get}" && -n "${opt_data}" ]]; then
+    parts+=("${opt_data}")
+  fi
+  if [[ ${#opt_urlencode_parts[@]} -gt 0 ]]; then
+    parts+=("${opt_urlencode_parts[@]}")
+  fi
+  [[ ${#parts[@]} -eq 0 ]] && return 0
+
+  [[ "${url_path}" == *'?'* ]] && sep='&'
+  url_path="${url_path}${sep}"
+  local first=1
+  for part in "${parts[@]}"; do
+    [[ "${first}" -eq 0 ]] && url_path="${url_path}&"
+    first=0
+    if [[ -n "${opt_get}" || ${#opt_urlencode_parts[@]} -gt 0 ]]; then
+      encoded=$(_urlencode_pair "${part}")
+      url_path="${url_path}${encoded}"
+    else
+      url_path="${url_path}${part}"
+    fi
+  done
+  if [[ -n "${opt_get}" ]]; then
+    opt_data=''
+  fi
+}
+
 # -- URL parsing --
 parse_url() {
   local raw_url="$1"
@@ -543,6 +697,7 @@ read_status_line() {
     die "Connection closed before status line received"
   fi
   local status_line="${raw_line%$'\r'}"
+  resp_status_line="${status_line}"
   vlog "< ${status_line}"
   [[ -n "${opt_head}" ]] && printf '%s\n' "${status_line}"
 
@@ -563,6 +718,7 @@ read_response_headers() {
     _open_write_fd "${opt_dump_headers}" \
       || die "Cannot open ${opt_dump_headers} for writing"
     dump_fd="${_DUMP_FD}"
+    printf '%s\n' "${resp_status_line}" >&"${dump_fd}"
   fi
 
   local raw_line header_line header_name
@@ -655,10 +811,22 @@ _splice_from_fd() {
     bashcat|bashcat-force) local -a _cmd=(_bashcat "${resp_content_length}" "${force}") ;;
   esac
 
+  local rc=0
   if [[ -n "${dest}" ]]; then
-    "${_cmd[@]}" <&"${src_fd}" > "${dest}"
+    "${_cmd[@]}" <&"${src_fd}" > "${dest}" || rc=$?
   else
-    "${_cmd[@]}" <&"${src_fd}"
+    "${_cmd[@]}" <&"${src_fd}" || rc=$?
+  fi
+  # HTTP/1.0 servers often RST the socket after the body; cat may exit non-zero
+  # even when Content-Length bytes were delivered.
+  [[ ${rc} -eq 0 || -n "${resp_content_length}" ]] && return 0
+  return "${rc}"
+}
+
+# _discard_body - read response body without writing it (for -f failures).
+_discard_body() {
+  if [[ -n "${resp_content_length}" && "${resp_content_length}" -gt 0 ]]; then
+    _splice_from_fd "${conn_read_fd}" /dev/null || true
   fi
 }
 
@@ -700,6 +868,7 @@ transfer_body() {
 
 # -- Main loop --
 parse_url "${url}"
+_apply_query_string
 _resolve_splicer
 redirs_left="${opt_max_redirs}"
 [[ -n "${_progress_mode}" ]] && _progress_start
@@ -710,16 +879,11 @@ while true; do
   read_status_line
   read_response_headers
 
-  if [[ "${resp_code}" -ge 200 && "${resp_code}" -lt 300 ]]; then
-    [[ -z "${opt_head}" ]] && transfer_body
-    close_connection
-    exit 0
-
-  elif [[ "${resp_code}" -ge 300 && "${resp_code}" -lt 400 ]]; then
-    [[ -z "${opt_follow}" ]]    && die "HTTP ${resp_code} ${resp_msg} (use -L to follow redirects)"
+  if [[ "${resp_code}" -ge 300 && "${resp_code}" -lt 400 && -n "${opt_follow}" ]]; then
     [[ -z "${resp_location}" ]] && die "HTTP ${resp_code} with no Location header"
     [[ "${redirs_left}" -le 0 ]] && die "Too many redirects (--max-redirs ${opt_max_redirs})"
     (( redirs_left-- )) || true
+    [[ -z "${opt_head}" ]] && _discard_body
     new_url=$(resolve_url "${resp_location}")
     if [[ -n "${_progress_mode}" ]]; then
       _progress_update 0 0
@@ -733,8 +897,19 @@ while true; do
     # 301/302/303: downgrade to GET and drop body (curl behaviour). 307/308: preserve method.
     case "${resp_code}" in 301|302|303) method="GET"; opt_data='' ;; esac
     continue
-
-  else
-    die "HTTP ${resp_code} ${resp_msg}"
   fi
+
+  if [[ -z "${opt_head}" ]]; then
+    if [[ -n "${opt_fail}" && "${resp_code}" -ge 400 ]]; then
+      _discard_body
+    else
+      transfer_body
+    fi
+  fi
+  close_connection
+
+  if [[ -n "${opt_fail}" && "${resp_code}" -ge 400 ]]; then
+    fail 22 "HTTP ${resp_code} ${resp_msg}"
+  fi
+  exit 0
 done

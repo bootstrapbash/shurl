@@ -125,20 +125,32 @@ shurl [OPTIONS] URL
 | Flag                  | Description                                            |
 | --------------------- | ------------------------------------------------------ |
 | `-v`                  | Verbose: print request and response headers to stderr  |
-| `-s`                  | Silent: suppress all stderr output                     |
+| `-s`                  | Silent: suppress progress meter and transfer errors    |
+| `-S`, `--show-error`  | Show transfer errors when combined with `-s`           |
+| `-f`, `--fail`        | Exit 22 on HTTP >= 400; suppress error response body   |
 | `-o <file>`           | Write response body to `<file>` instead of stdout      |
 | `-I`                  | HEAD request: print response headers, no body          |
 | `-L`                  | Follow redirects (3xx responses)                       |
+| `-G`, `--get`         | Put `-d` / `--data-urlencode` data in the URL query    |
 | `-H "Name: Val"`      | Add a request header (repeatable)                      |
 | `-u user:pass`        | HTTP Basic authentication                              |
 | `-X METHOD`           | HTTP method (default: GET, or POST when `-d` is given) |
-| `-d <data>`           | Request body; implies POST unless `-X` overrides       |
-| `-D <file>`           | Dump response headers to `<file>`                      |
+| `-d`, `--data <data>` | Request body; implies POST unless `-X` / `-G` override |
+| `--data-urlencode`    | URL-encoded query parameter (typically with `-G`)      |
+| `--data-binary`       | Request body; `@file` reads from file                  |
+| `-D <file>`           | Dump response headers (including status line) to file  |
 | `-A <agent>`          | Custom User-Agent string                               |
 | `-e <url>`            | Referer URL                                            |
 | `--max-redirs N`      | Maximum redirects to follow (default: 10)              |
 | `--connect-timeout N` | Seconds to wait for the first response byte            |
 | `--help`              | Print help and exit                                    |
+
+Options may appear before or after the URL. Combined short flags such as
+`-sL` and `-sI` are supported.
+
+HTTP status handling matches curl: by default the response body is printed
+and the exit code is 0 even for 4xx/5xx responses. Use `-f` to fail (exit
+22) on HTTP >= 400 without printing the body.
 
 
 ## Examples
@@ -249,6 +261,8 @@ curl if you need strict TLS certificate checking.
 cannot be passed via `-d`; use curl for that case.
 - **Redirect body semantics match curl.** 301, 302, and 303 redirects drop the
 request body and switch to GET. 307 and 308 preserve the method and body.
+- **HTTP error semantics match curl.** 4xx/5xx responses print the body and
+exit 0 by default; `-f` suppresses the body and exits 22.
 
 ## Development
 

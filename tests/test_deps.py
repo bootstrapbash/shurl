@@ -170,6 +170,20 @@ def test_plain_http_post_works_with_only_cat(shurl_script, http_server, tmp_path
     assert r.stdout == "x=1"
 
 
+def test_plain_http_data_binary_file_with_only_cat(shurl_script, http_server, tmp_path):
+    """--data-binary @file must not need wc/tr/stat; cat (already allowed) is enough."""
+    env = _restricted_env(tmp_path, "bash", "cat")
+    body_file = tmp_path / "body.txt"
+    body_file.write_text("line1\nline2\n")
+    r = _run(
+        shurl_script, env,
+        "--data-binary", f"@{body_file}",
+        f"{http_server.url}/echo-body",
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "line1\nline2\n"
+
+
 def test_plain_http_works_with_bashcat_only(shurl_script, http_server, tmp_path):
     """Plain HTTP with no external binaries except bootstrap shell."""
     env = _restricted_env(tmp_path, "bash")

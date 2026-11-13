@@ -112,6 +112,7 @@ def test_dump_headers_to_file(run, http_server, tmp_path):
     assert r.returncode == 0
     with open(dumpfile) as f:
         content = f.read()
+    assert content.startswith("HTTP/1.0 200")
     assert "Content-Type" in content
     assert "Content-Length" in content
 
@@ -144,6 +145,52 @@ def test_basic_auth(run, http_server):
     assert r.returncode == 0
     # The Authorization header should be present in the echo output.
     assert "Authorization: Basic" in r.stdout
+
+
+def test_combined_sI_head_silent(run, http_server):
+    r = run("-sI", f"{http_server.url}/get")
+    assert r.returncode == 0
+    assert "HTTP/1.0 200" in r.stdout
+    assert r.stderr == ""
+
+
+def test_combined_sL_follows_redirect(run, http_server):
+    r = run("-sL", f"{http_server.url}/redirect301")
+    assert r.returncode == 0
+    assert r.stdout == "hello world\n"
+    assert r.stderr == ""
+
+
+def test_get_with_data_urlencode(run, http_server):
+    r = run("-G", "--data-urlencode", "q=a b", f"{http_server.url}/echo-path")
+    assert r.returncode == 0
+    assert "q=a+b" in r.stdout or "q=a%20b" in r.stdout
+
+
+def test_multiple_data_urlencode(run, http_server):
+    r = run(
+        "-G",
+        "--data-urlencode", "a=1",
+        "--data-urlencode", "b=2",
+        f"{http_server.url}/echo-path",
+    )
+    assert r.returncode == 0
+    assert "a=1" in r.stdout
+    assert "b=2" in r.stdout
+
+
+def test_data_long_form(run, http_server):
+    r = run("--data", "key=value", f"{http_server.url}/echo-body")
+    assert r.returncode == 0
+    assert r.stdout == "key=value"
+
+
+def test_data_binary_from_file(run, http_server, tmp_path):
+    body_file = tmp_path / "body.txt"
+    body_file.write_text("line1\nline2\n")
+    r = run("--data-binary", f"@{body_file}", f"{http_server.url}/echo-body")
+    assert r.returncode == 0
+    assert r.stdout == "line1\nline2\n"
 
 
 if __name__ == "__main__":

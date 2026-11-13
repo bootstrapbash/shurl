@@ -12,11 +12,11 @@ def test_basic_get_returns_body(run, http_server):
 
 
 def test_empty_path_defaults_to_root(run, http_server):
-    # Connecting to the host with no path; server returns 404 for "/" route
-    # (our test server 404s on /), so just confirm the script parses the URL
-    # without crashing and exits with a non-zero code for 404.
+    # Connecting to the host with no path; server returns 404 for "/" route.
+    # curl-compatible: print body, exit 0 (use -f for exit 22).
     r = run(f"{http_server.url}")
-    assert r.returncode != 0  # 404 from server
+    assert r.returncode == 0
+    assert r.stdout == "Not Found"
 
 
 def test_explicit_root_path(run, http_server):

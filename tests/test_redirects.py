@@ -9,10 +9,10 @@ import pytest
     (307, "/redirect307"),
     (308, "/redirect308"),
 ])
-def test_redirect_without_L_fails(run, http_server, code, endpoint):
+def test_redirect_without_L_exits_zero(run, http_server, code, endpoint):
     r = run(f"{http_server.url}{endpoint}")
-    assert r.returncode != 0
-    assert "use -L" in r.stderr
+    assert r.returncode == 0
+    assert "use -L" not in r.stderr
 
 
 @pytest.mark.parametrize("code,endpoint", [

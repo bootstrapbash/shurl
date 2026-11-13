@@ -130,8 +130,20 @@ class _TestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
+        elif route == "/badrequest":
+            self._send(
+                400,
+                b'{"errorMessages": ["query is bad"], "errors": {}}',
+                content_type="application/json",
+            )
         elif route == "/notfound":
             self._send(404, b"Not Found")
+        elif route == "/badrequest":
+            self._send(
+                400,
+                b'{"errorMessages": ["query is bad"], "errors": {}}',
+                content_type="application/json",
+            )
         elif route == "/unauthorized":
             self._send(401, b"Unauthorized")
         elif route == "/forbidden":
